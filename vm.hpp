@@ -22,8 +22,6 @@ public:
     Error(std::string const& what, int const errNo) :
         std::runtime_error(what),
         errNo(errNo) {}
-protected:
-    std::string what;
     int errNo;
 };
 
@@ -122,6 +120,14 @@ public:
     // @throws: KvmError in case of any KVM ioctl error.
     void enableProtectedMode();
 
+    // Enable 64-bit/Long mode on the vCpu. This function does setup a simple
+    // paging setup where the first 1GiB of the guest physical memory is
+    // identity mapped. As with enableProtectedMode() there no GDT is setup,
+    // instead segment registers have their hidden written.
+    // @throws: KvmError in case of any KVM ioctl error, MmapError in case of a
+    // mmap error.
+    void enable64BitsMode();
+
     // Get pointer to guest's physical memory.
     // Very unsafe, but certainly very fun.
     void *getMemory();
@@ -146,6 +152,14 @@ public:
     State step();
 
 private:
+    // Add more physical memory to the guest.
+    // @param offset: The offset at which the memory should be added.
+    // @param size: The amount of memory to add to the guest in bytes. Must be a
+    // multiple of PAGE_SIZE.
+    // @return: The userspace address of the allocated memory.
+    // @throws: KvmError or MmapError in case of kvm ioctl error or mmap error.
+    void *addPhysicalMemory(u64 const offset, size_t const size);
+
     // File descriptor on /dev/kvm.
     int kvmHandle;
     // File descriptor for the KVM.
@@ -160,6 +174,9 @@ private:
     void *memory;
     // The current state of the KVM.
     State currState;
+    // The number of memory slots used. This corrolates with the number of times
+    // addPhysicalMemory has been called.
+    u32 usedMemorySlots;
 };
 }
 

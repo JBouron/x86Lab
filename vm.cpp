@@ -37,26 +37,47 @@ Vm::Vm(u64 const memorySize) {
     }
 
     // Create memory for this VM.
-    // First mmap some memory.
-    int const prot(PROT_READ | PROT_WRITE);
-    int const flags(MAP_PRIVATE | MAP_ANONYMOUS);
-    // Round mmap size to nearest page boundary.
+    usedMemorySlots = 0;
     physicalMemorySize = memorySize * PAGE_SIZE;
-    memory = ::mmap(NULL, physicalMemorySize, prot, flags, -1, 0);
-    if (memory == MAP_FAILED) {
-        throw MmapError("Failed to mmap memory for guest", errno);
+    memory = addPhysicalMemory(0x0, physicalMemorySize);
+
+    // Disable any MSR access filtering.
+    kvm_msr_filter msrFilter;
+    msrFilter.flags = 0;
+    for (size_t i(0); i < KVM_MSR_FILTER_MAX_RANGES; ++i) {
+        msrFilter.ranges[i].nmsrs = 0;
+    }
+    if (::ioctl(vmFd, KVM_X86_SET_MSR_FILTER, &msrFilter) == -1) {
+        throw KvmError("Failed to allow MSR access", errno);
     }
 
-    // Then map the memory to the guest. The memory is always mapped to 0.
-    kvm_userspace_memory_region const kvmMap = {
-        .slot = 0,
-        .flags = 0,
-        .guest_phys_addr = 0,
-        .memory_size = physicalMemorySize,
-        .userspace_addr = reinterpret_cast<u64>(memory),
-    };
-    if (::ioctl(vmFd, KVM_SET_USER_MEMORY_REGION, &kvmMap) == -1) {
-        throw KvmError("Failed to map memory to guest", errno);
+    kvm_enable_cap kvmCap;
+    kvmCap.cap = KVM_CAP_X86_USER_SPACE_MSR;
+    kvmCap.flags = 0;
+    kvmCap.args[0] = KVM_MSR_EXIT_REASON_UNKNOWN | KVM_MSR_EXIT_REASON_FILTER;
+    for (size_t i(1); i < 4; ++i) {
+        kvmCap.args[i] = 0;
+    }
+    if (::ioctl(vmFd, KVM_ENABLE_CAP, &kvmCap) == -1) {
+        throw KvmError("Failed to set capability", errno);
+    }
+
+    // FIXME: We should somehow guess what this number should be. Maybe by
+    // repeatedly calling the ioctl and increasing it every time it fails?
+    size_t const nent(64);
+    size_t const structSize(sizeof(kvm_cpuid2) + nent * sizeof(kvm_cpuid_entry2));
+    kvm_cpuid2 * const kvmCpuid(reinterpret_cast<kvm_cpuid2*>(malloc(structSize)));
+    std::memset(kvmCpuid, 0x0, structSize);
+    std::cout << "kvmCpuid = " << kvmCpuid << std::endl;
+    assert(!!kvmCpuid);
+    kvmCpuid->nent = nent;
+    if (::ioctl(kvmHandle, KVM_GET_SUPPORTED_CPUID, kvmCpuid) == -1) {
+        throw KvmError("Failed to get supported CPUID", errno);
+    }
+
+    // Now set the CPUID capabilities.
+    if (::ioctl(vcpuFd, KVM_SET_CPUID2, kvmCpuid) == -1) {
+        throw KvmError("Failed to set supported CPUID", errno);
     }
 
     // The KVM is not runnable until some code is at least loaded.
@@ -269,6 +290,94 @@ void Vm::enableProtectedMode() {
     }
 }
 
+void Vm::enable64BitsMode() {
+    // First off we need to setup a set of page tables, as paging is mandatory
+    // when in Long Mode.
+    // We can allocate the pages used for the PML4 and PDPT after the requested
+    // memory.
+    
+    // These are guaranteed to be page aligned since the physical memory size is
+    // a multiple of page size.
+    u64 const pml4Offset(physicalMemorySize);
+    u64 const pdptOffset(pml4Offset + PAGE_SIZE);
+    assert(!(pml4Offset % PAGE_SIZE));
+
+    // Userspace addresses for the PML4 and PDPT.
+    void * const pml4Addr(addPhysicalMemory(pml4Offset, PAGE_SIZE));
+    void * const pdptAddr(addPhysicalMemory(pdptOffset, PAGE_SIZE));
+
+    // FIXME: As of now we only R/W Identity-Map the first 1GiB. Because we are
+    // lazy we use huge 1GiB pages. Everything is in supervisor mode.
+    // Entry 0: Pointing to the allocated PDPT with R/W permission.
+    *reinterpret_cast<u64*>(pml4Addr) = (pdptOffset & 0xFFFFFFFFFFFFF000ULL) | 3;
+    // Entry 0: Pointing to 1GiB frame starting at offset 0, R/W permissions.
+    // Bit 7 indicates that this is a 1GiB page.
+    *reinterpret_cast<u64*>(pdptAddr) = (1 << 7) | 3;
+
+    // Page table is ready now setup the registers as they would be in long
+    // mode.
+    kvm_sregs sregs;
+    if (::ioctl(vcpuFd, KVM_GET_SREGS, &sregs) == -1) {
+        throw KvmError("Cannot get guest special registers", errno);
+    }
+
+    // Enable PAE, mandatory for 64-bits.
+    sregs.cr4 = 0x20;
+
+    // Load PML4 into CR3.
+    sregs.cr3 = pml4Offset & 0xFFFFFFFFFFFFF000ULL;
+
+    // Set LME and LMA bits to 1 in EFER.
+    sregs.efer = 0x500;
+
+    // CR0: Enable PG and PE bits.
+    // Enable PG bit in CR0. FIXME: Remove the Cache Disable and Not
+    // Write-through bits.
+    // Note: Per Intel's documentation if PG is 1 then PE (bit 0) must be 1 as
+    // well. Otherwise VMX entry fails.
+    sregs.cr0 = 0xe0000011;
+
+    // Setup segment registers' hidden parts.
+    sregs.cs.selector = 20;
+    sregs.cs.base = 0;
+    sregs.cs.limit = 0xFFFFFFFF;
+    sregs.cs.type = 0xa;
+    sregs.cs.present = 1;
+    sregs.cs.dpl = 0;
+    sregs.cs.db = 0;
+    sregs.cs.s = 1;
+    sregs.cs.l = 1;
+    sregs.cs.g = 1;
+    sregs.cs.avl = 0;
+    // Per Intel's documentation unusable must be 0 for the access flags to be
+    // loaded in the segment register when entering the VM.
+    sregs.cs.unusable = 0;
+
+    // Data and stack segments. Pretend that GDT[2] is a flat data segment with
+    // R/W access flags.
+    sregs.ds.selector = 0x18;
+    sregs.ds.base = 0;
+    sregs.ds.limit = 0xFFFFFFFF;
+    sregs.ds.type = 2;
+    sregs.ds.present = 1;
+    sregs.ds.dpl = 0;
+    sregs.ds.db = 1;
+    sregs.ds.s = 1;
+    sregs.ds.l = 0;
+    sregs.ds.g = 1;
+    sregs.ds.avl = 0;
+    sregs.ds.unusable = 0;
+
+    sregs.es = sregs.ds;
+    sregs.fs = sregs.ds;
+    sregs.gs = sregs.ds;
+    sregs.ss = sregs.ds;
+
+    if (::ioctl(vcpuFd, KVM_SET_SREGS, &sregs) == -1) {
+        throw KvmError("Cannot set guest special registers", errno);
+    }
+}
+
 void* Vm::getMemory() {
     return memory;
 }
@@ -340,6 +449,32 @@ Vm::State Vm::step() {
     }
     return currState;
 }
+
+void* Vm::addPhysicalMemory(u64 const offset, size_t const size) {
+    assert(!(size % PAGE_SIZE));
+
+    // Mmap some anonymous memory for the requested size.
+    int const prot(PROT_READ | PROT_WRITE);
+    int const flags(MAP_PRIVATE | MAP_ANONYMOUS);
+    void * const userspace(::mmap(NULL, size, prot, flags, -1, 0));
+    if (memory == MAP_FAILED) {
+        throw MmapError("Failed to mmap memory for guest", errno);
+    }
+
+    // Then map the memory to the guest.
+    kvm_userspace_memory_region const kvmMap({
+        .slot = usedMemorySlots,
+        .flags = 0,
+        .guest_phys_addr = offset,
+        .memory_size = size,
+        .userspace_addr = reinterpret_cast<u64>(userspace),
+    });
+    if (::ioctl(vmFd, KVM_SET_USER_MEMORY_REGION, &kvmMap) == -1) {
+        throw KvmError("Failed to map memory to guest", errno);
+    }
+    usedMemorySlots++;
+    return userspace;
+}
 }
 
 std::ostream& operator<<(std::ostream& os, X86Lab::Vm::RegisterFile const& r) {
@@ -347,39 +482,41 @@ std::ostream& operator<<(std::ostream& os, X86Lab::Vm::RegisterFile const& r) {
     char buf[512];
     sprintf(buf, "-- @ rip = 0x%016x --------------------------", r.rip);
     os << buf << std::endl;
-    sprintf(buf, "rax = 0x%016x\trbx = 0x%016x", r.rax, r.rbx);
+    sprintf(buf, "rax = 0x%016llx\trbx = 0x%016llx", r.rax, r.rbx);
     os << buf << std::endl;
-    sprintf(buf, "rcx = 0x%016x\trdx = 0x%016x", r.rcx, r.rdx);
+    sprintf(buf, "rcx = 0x%016llx\trdx = 0x%016llx", r.rcx, r.rdx);
     os << buf << std::endl;
-    sprintf(buf, "rdi = 0x%016x\trsi = 0x%016x", r.rdi, r.rsi);
+    sprintf(buf, "rdi = 0x%016llx\trsi = 0x%016llx", r.rdi, r.rsi);
     os << buf << std::endl;
-    sprintf(buf, "rbp = 0x%016x\trsp = 0x%016x", r.rbp, r.rsp);
+    sprintf(buf, "rbp = 0x%016llx\trsp = 0x%016llx", r.rbp, r.rsp);
     os << buf << std::endl;
-    sprintf(buf, "r8  = 0x%016x\tr9  = 0x%016x", r.r8, r.r9);
+    sprintf(buf, "r8  = 0x%016llx\tr9  = 0x%016llx", r.r8, r.r9);
     os << buf << std::endl;
-    sprintf(buf, "r10 = 0x%016x\tr11 = 0x%016x", r.r10, r.r11);
+    sprintf(buf, "r10 = 0x%016llx\tr11 = 0x%016llx", r.r10, r.r11);
     os << buf << std::endl;
-    sprintf(buf, "r12 = 0x%016x\tr13 = 0x%016x", r.r12, r.r13);
+    sprintf(buf, "r12 = 0x%016llx\tr13 = 0x%016llx", r.r12, r.r13);
     os << buf << std::endl;
-    sprintf(buf, "r14 = 0x%016x\tr15 = 0x%016x", r.r14, r.r15);
+    sprintf(buf, "r14 = 0x%016llx\tr15 = 0x%016llx", r.r14, r.r15);
     os << buf << std::endl;
-    sprintf(buf, "rip = 0x%016x\trfl = 0x%016x", r.rip, r.rflags);
+    sprintf(buf, "rip = 0x%016llx\trfl = 0x%016llx", r.rip, r.rflags);
     os << buf << std::endl;
-    sprintf(buf, "cs = 0x%08x\tds = 0x%08x", r.cs, r.ds);
+    sprintf(buf, "cs = 0x%08llx\tds = 0x%08llx", r.cs, r.ds);
     os << buf << std::endl;
-    sprintf(buf, "es = 0x%08x\tfs = 0x%08x", r.es, r.fs);
+    sprintf(buf, "es = 0x%08llx\tfs = 0x%08llx", r.es, r.fs);
     os << buf << std::endl;
-    sprintf(buf, "gs = 0x%08x\tss = 0x%08x", r.gs, r.ss);
+    sprintf(buf, "gs = 0x%08llx\tss = 0x%08llx", r.gs, r.ss);
     os << buf << std::endl;
-    sprintf(buf, "cr0 = 0x%016x\tcr2 = 0x%016x", r.cr0, r.cr2);
+    sprintf(buf, "cr0 = 0x%016llx\tcr2 = 0x%016llx", r.cr0, r.cr2);
     os << buf << std::endl;
-    sprintf(buf, "cr3 = 0x%016x\tcr4 = 0x%016x", r.cr3, r.cr4);
+    sprintf(buf, "cr3 = 0x%016llx\tcr4 = 0x%016llx", r.cr3, r.cr4);
     os << buf << std::endl;
-    sprintf(buf, "cr8 = 0x%016x", r.cr8);
+    sprintf(buf, "cr8 = 0x%016llx", r.cr8);
     os << buf << std::endl;
-    sprintf(buf, "idt :  base = 0x%016x\tlimit = %08x", r.idt.base, r.idt.limit);
+    sprintf(buf, "idt :  base = 0x%016llx\tlimit = %08llx", r.idt.base, r.idt.limit);
     os << buf << std::endl;
-    sprintf(buf, "gdt :  base = 0x%016x\tlimit = %08x", r.gdt.base, r.gdt.limit);
+    sprintf(buf, "gdt :  base = 0x%016llx\tlimit = %08llx", r.gdt.base, r.gdt.limit);
+    os << buf << std::endl;
+    sprintf(buf, "efer = 0x%016llx", r.efer);
     os << buf << std::endl;
     return os;
 }
