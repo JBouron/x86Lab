@@ -4,35 +4,10 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <stdint.h>
-#include <cassert>
-#include <cstring>
-#include <stdexcept>
-#include <string>
 
-using u8 = uint8_t;
-using u16 = uint16_t;
-using u32 = uint32_t;
-using u64 = uint64_t;
+#include "util.hpp"
 
 namespace X86Lab {
-
-class Error : public std::runtime_error {
-public:
-    Error(std::string const& what, int const errNo) :
-        std::runtime_error(what),
-        errNo(errNo) {}
-    int errNo;
-};
-
-class KvmError : public Error {
-public:
-    KvmError(std::string const& what, int const errNo) : Error(what, errNo) {}
-};
-class MmapError : public Error {
-public:
-    MmapError(std::string const& what, int const errNo) : Error(what, errNo) {}
-};
 
 constexpr size_t PAGE_SIZE(4096);
 
