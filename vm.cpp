@@ -1,49 +1,27 @@
 #include "vm.hpp"
+#include <memory>
 
 namespace X86Lab {
 
-Vm::Vm(u64 const memorySize) {
-    // Open handle to kvm subsystem.
-    kvmHandle = ::open("/dev/kvm", O_RDWR | O_CLOEXEC);
-    if (kvmHandle == -1) {
-        throw KvmError("Cannot open /dev/kvm", errno);
-    }
-
-    // Actually create VM.
-    vmFd = ::ioctl(kvmHandle, KVM_CREATE_VM, 0);
-    if (vmFd == -1) {
-        throw KvmError("Cannot create VM", errno);
-    }
-
-    // Add vCpu to this VM.
-    vcpuFd = ::ioctl(vmFd, KVM_CREATE_VCPU, 0);
-    if (vcpuFd == -1) {
-        throw KvmError("Cannot create VCPU", errno);
-    }
-
-    // Map the kvm_run structure to memory.
-    int const vcpuRunSize(::ioctl(kvmHandle, KVM_GET_VCPU_MMAP_SIZE, NULL));
-    if (vcpuRunSize == -1) {
-        throw KvmError("Cannot get kvm_run structure size", errno);
-    }
-    kvmRun = static_cast<kvm_run*>(::mmap(NULL,
-                                   vcpuRunSize,
-                                   PROT_READ | PROT_WRITE,
-                                   MAP_PRIVATE,
-                                   vcpuFd,
-                                   0));
-    if (kvmRun == MAP_FAILED) {
-        throw MmapError("Failed to mmap kvm_run structure", errno);
-    }
-
-    // Create memory for this VM.
-    usedMemorySlots = 0;
-    physicalMemorySize = memorySize * PAGE_SIZE;
-    memory = addPhysicalMemory(0x0, physicalMemorySize);
-
-    // Disable any MSR access filtering.
-    kvm_msr_filter msrFilter;
-    msrFilter.flags = 0;
+Vm::Vm(u64 const memorySize) :
+    kvmHandle(getKvmHandle()),
+    vmFd(createKvmVm(kvmHandle)),
+    vcpuFd(createKvmVcpu(vmFd)),
+    kvmRun(getKvmRunStruct(kvmHandle, vcpuFd)),
+    usedMemorySlots(0),
+    physicalMemorySize(memorySize * PAGE_SIZE),
+    memory(addPhysicalMemory(0x0, physicalMemorySize)),
+    currState(State::NoCodeLoaded)
+    {
+    // Disable any MSR access filtering. KVM's doc indicate that if this is not
+    // done then the default behaviour is used. However it's not really clear if
+    // the default behaviour allows access to MSRs or not. Hence disable it here
+    // completely.
+    kvm_msr_filter msrFilter({
+        .flags = 0,
+    });
+    // Setting all ranges to 0 disable filtering. In this case flags must be
+    // zero as well.
     for (size_t i(0); i < KVM_MSR_FILTER_MAX_RANGES; ++i) {
         msrFilter.ranges[i].nmsrs = 0;
     }
@@ -51,17 +29,8 @@ Vm::Vm(u64 const memorySize) {
         throw KvmError("Failed to allow MSR access", errno);
     }
 
-    kvm_enable_cap kvmCap;
-    kvmCap.cap = KVM_CAP_X86_USER_SPACE_MSR;
-    kvmCap.flags = 0;
-    kvmCap.args[0] = KVM_MSR_EXIT_REASON_UNKNOWN | KVM_MSR_EXIT_REASON_FILTER;
-    for (size_t i(1); i < 4; ++i) {
-        kvmCap.args[i] = 0;
-    }
-    if (::ioctl(vmFd, KVM_ENABLE_CAP, &kvmCap) == -1) {
-        throw KvmError("Failed to set capability", errno);
-    }
-
+    // Setup access to CPUID information. We don't want to "hide" anything from
+    // the guest, having CPUID instruction available can always be useful.
     // FIXME: We should somehow guess what this number should be. Maybe by
     // repeatedly calling the ioctl and increasing it every time it fails?
     size_t const nent(64);
@@ -79,9 +48,47 @@ Vm::Vm(u64 const memorySize) {
     if (::ioctl(vcpuFd, KVM_SET_CPUID2, kvmCpuid) == -1) {
         throw KvmError("Failed to set supported CPUID", errno);
     }
+}
 
-    // The KVM is not runnable until some code is at least loaded.
-    currState = State::NoCodeLoaded;
+int Vm::getKvmHandle(){
+    int const kvmHandle(::open("/dev/kvm", O_RDWR | O_CLOEXEC));
+    if (kvmHandle == -1) {
+        throw KvmError("Cannot open /dev/kvm", errno);
+    } else {
+        return kvmHandle;
+    }
+}
+int Vm::createKvmVm(int const kvmHandle) {
+    int const vmFd(::ioctl(kvmHandle, KVM_CREATE_VM, 0));
+    if (vmFd == -1) {
+        throw KvmError("Cannot create VM", errno);
+    } else {
+        return vmFd;
+    }
+}
+
+int Vm::createKvmVcpu(int const vmFd) {
+    int const vcpuFd(::ioctl(vmFd, KVM_CREATE_VCPU, 0));
+    if (vcpuFd == -1) {
+        throw KvmError("Cannot create VCPU", errno);
+    } else {
+        return vcpuFd;
+    }
+}
+
+kvm_run& Vm::getKvmRunStruct(int const kvmHandle, int const vcpuFd) {
+    int const vcpuRunSize(::ioctl(kvmHandle, KVM_GET_VCPU_MMAP_SIZE, NULL));
+    if (vcpuRunSize == -1) {
+        throw KvmError("Cannot get kvm_run structure size", errno);
+    }
+    int const prot(PROT_READ | PROT_WRITE);
+    int const flags(MAP_PRIVATE);
+    void * const mapRes(::mmap(NULL, vcpuRunSize, prot, flags, vcpuFd, 0));
+    if (mapRes == MAP_FAILED) {
+        throw MmapError("Failed to mmap kvm_run structure", errno);
+    } else {
+        return *reinterpret_cast<kvm_run*>(mapRes);
+    }
 }
 
 void Vm::loadCode(u8 const * const shellCode, u64 const shellCodeSize) {
@@ -104,33 +111,22 @@ void Vm::loadCode(u8 const * const shellCode, u64 const shellCodeSize) {
     // Option 1 would mean having to map another page in the guest physical
     // memory (namely at 0xFFFFF000) and that the first call to step() does not
     // actually run the first instruction. Option 2 is easier to implement.
-    kvm_sregs sregs;
-    if (::ioctl(vcpuFd, KVM_GET_SREGS, &sregs) == -1) {
-        throw KvmError("Cannot get guest special registers", errno);
-    }
+    kvm_sregs sregs(kvmGetSRegs());
     sregs.cs.base = 0x0;
     // Per Intel's documentation, if the guest is running in real-mode then the
     // limit MUST be 0xFFFF. See "26.3.1.2 Checks on Guest Segment Registers" in
     // Vol. 3C.
     sregs.cs.limit = 0xFFFF;
     sregs.cs.selector = 0;
-    if (::ioctl(vcpuFd, KVM_SET_SREGS, &sregs) == -1) {
-        throw KvmError("Cannot set guest special registers", errno);
-    }
+    kvmSetSRegs(sregs);
 
     // The KVM is now runnable.
     currState = State::Runnable;
 }
 
 Vm::RegisterFile Vm::getRegisters() const {
-    kvm_regs regs;
-    if (::ioctl(vcpuFd, KVM_GET_REGS, &regs) == -1) {
-        throw KvmError("Cannot get guest registers", errno);
-    }
-    kvm_sregs sregs;
-    if (::ioctl(vcpuFd, KVM_GET_SREGS, &sregs) == -1) {
-        throw KvmError("Cannot get guest special registers", errno);
-    }
+    kvm_regs const regs(kvmGetRegs());
+    kvm_sregs const sregs(kvmGetSRegs());
 
     RegisterFile const regFile({
         .rax = regs.rax,
@@ -201,17 +197,12 @@ void Vm::setRegisters(RegisterFile const& registerValues) {
         .rip    = registerValues.rip,
         .rflags = registerValues.rflags,
     });
-    if (::ioctl(vcpuFd, KVM_SET_REGS, &regs) == -1) {
-        throw KvmError("Cannot set guest registers", errno);
-    }
+    kvmSetRegs(regs);
 
     // RegisterFile doesn't quite contain all the values that kvm_sregs has.
     // Hence for those missing values, we read the current kvm_sregs to re-use
     // them in the call to KVM_SET_SREGS.
-    kvm_sregs sregs;
-    if (::ioctl(vcpuFd, KVM_GET_SREGS, &sregs) == -1) {
-        throw KvmError("Cannot get guest special registers", errno);
-    }
+    kvm_sregs sregs(kvmGetSRegs());
 
     sregs.cs.selector = registerValues.cs,
     sregs.ds.selector = registerValues.ds,
@@ -230,16 +221,11 @@ void Vm::setRegisters(RegisterFile const& registerValues) {
     sregs.gdt.base = registerValues.gdt.base;
     sregs.gdt.limit = registerValues.gdt.limit;
 
-    if (::ioctl(vcpuFd, KVM_SET_SREGS, &sregs) == -1) {
-        throw KvmError("Cannot set guest special registers", errno);
-    }
+    kvmSetSRegs(sregs);
 }
 
 void Vm::enableProtectedMode() {
-    kvm_sregs sregs;
-    if (::ioctl(vcpuFd, KVM_GET_SREGS, &sregs) == -1) {
-        throw KvmError("Cannot get guest special registers", errno);
-    }
+    kvm_sregs sregs(kvmGetSRegs());
 
     // Enable protected mode.
     sregs.cr0 |= 1;
@@ -285,9 +271,7 @@ void Vm::enableProtectedMode() {
     sregs.gs = sregs.ds;
     sregs.ss = sregs.ds;
 
-    if (::ioctl(vcpuFd, KVM_SET_SREGS, &sregs) == -1) {
-        throw KvmError("Cannot set guest special registers", errno);
-    }
+    kvmSetSRegs(sregs);
 }
 
 void Vm::enable64BitsMode() {
@@ -316,10 +300,7 @@ void Vm::enable64BitsMode() {
 
     // Page table is ready now setup the registers as they would be in long
     // mode.
-    kvm_sregs sregs;
-    if (::ioctl(vcpuFd, KVM_GET_SREGS, &sregs) == -1) {
-        throw KvmError("Cannot get guest special registers", errno);
-    }
+    kvm_sregs sregs(kvmGetSRegs());
 
     // Enable PAE, mandatory for 64-bits.
     sregs.cr4 = 0x20;
@@ -373,9 +354,7 @@ void Vm::enable64BitsMode() {
     sregs.gs = sregs.ds;
     sregs.ss = sregs.ds;
 
-    if (::ioctl(vcpuFd, KVM_SET_SREGS, &sregs) == -1) {
-        throw KvmError("Cannot set guest special registers", errno);
-    }
+    kvmSetSRegs(sregs);
 }
 
 void* Vm::getMemory() {
@@ -443,11 +422,49 @@ Vm::State Vm::step() {
         throw KvmError("Cannot run VM", errno);
     }
 
-    std::cout << "Exit reason = " << exitReasonToString[kvmRun->exit_reason] << std::endl;
-    if (kvmRun->exit_reason != KVM_EXIT_DEBUG) {
+    std::cout << "Exit reason = " << exitReasonToString[kvmRun.exit_reason] << std::endl;
+    if (kvmRun.exit_reason == KVM_EXIT_DEBUG) {
+        // The execution stopped after one step, we are still runnable.
+        currState = State::Runnable;
+    } else if (kvmRun.exit_reason == KVM_EXIT_SHUTDOWN) {
+        // Execution stopped the host. This is most likely a triple-fault hehe.
+        currState = State::Shutdown;
+    } else if (kvmRun.exit_reason == KVM_EXIT_HLT) {
+        // The single step executed a halt instruction.
+        currState = State::Halted;
+    } else {
+        // For now consider everything else as an error.
         currState = State::SingleStepError;
     }
     return currState;
+}
+
+kvm_regs Vm::kvmGetRegs() const {
+    kvm_regs regs;
+    if (::ioctl(vcpuFd, KVM_GET_REGS, &regs) == -1) {
+        throw KvmError("Cannot get guest registers", errno);
+    }
+    return regs;
+}
+
+void Vm::kvmSetRegs(kvm_regs const& regs) {
+    if (::ioctl(vcpuFd, KVM_SET_REGS, std::addressof(regs)) == -1) {
+        throw KvmError("Cannot set guest registers", errno);
+    }
+}
+
+kvm_sregs Vm::kvmGetSRegs() const {
+    kvm_sregs sregs;
+    if (::ioctl(vcpuFd, KVM_GET_SREGS, &sregs) == -1) {
+        throw KvmError("Cannot get guest special registers", errno);
+    }
+    return sregs;
+}
+
+void Vm::kvmSetSRegs(kvm_sregs const& regs) {
+    if (::ioctl(vcpuFd, KVM_SET_SREGS, std::addressof(regs)) == -1) {
+        throw KvmError("Cannot set guest special registers", errno);
+    }
 }
 
 void* Vm::addPhysicalMemory(u64 const offset, size_t const size) {
@@ -469,6 +486,12 @@ void* Vm::addPhysicalMemory(u64 const offset, size_t const size) {
         .memory_size = size,
         .userspace_addr = reinterpret_cast<u64>(userspace),
     });
+    std::cout << std::hex;
+    std::cout << kvmMap.slot << std::endl;
+    std::cout << kvmMap.flags << std::endl;
+    std::cout << kvmMap.guest_phys_addr << std::endl;
+    std::cout << kvmMap.memory_size << std::endl;
+    std::cout << kvmMap.userspace_addr << std::endl;
     if (::ioctl(vmFd, KVM_SET_USER_MEMORY_REGION, &kvmMap) == -1) {
         throw KvmError("Failed to map memory to guest", errno);
     }
@@ -480,43 +503,43 @@ void* Vm::addPhysicalMemory(u64 const offset, size_t const size) {
 std::ostream& operator<<(std::ostream& os, X86Lab::Vm::RegisterFile const& r) {
     // TODO: Fix this mess.
     char buf[512];
-    sprintf(buf, "-- @ rip = 0x%016x --------------------------", r.rip);
+    sprintf(buf, "-- @ rip = 0x%016lx --------------------------", r.rip);
     os << buf << std::endl;
-    sprintf(buf, "rax = 0x%016llx\trbx = 0x%016llx", r.rax, r.rbx);
+    sprintf(buf, "rax = 0x%016lx\trbx = 0x%016lx", r.rax, r.rbx);
     os << buf << std::endl;
-    sprintf(buf, "rcx = 0x%016llx\trdx = 0x%016llx", r.rcx, r.rdx);
+    sprintf(buf, "rcx = 0x%016lx\trdx = 0x%016lx", r.rcx, r.rdx);
     os << buf << std::endl;
-    sprintf(buf, "rdi = 0x%016llx\trsi = 0x%016llx", r.rdi, r.rsi);
+    sprintf(buf, "rdi = 0x%016lx\trsi = 0x%016lx", r.rdi, r.rsi);
     os << buf << std::endl;
-    sprintf(buf, "rbp = 0x%016llx\trsp = 0x%016llx", r.rbp, r.rsp);
+    sprintf(buf, "rbp = 0x%016lx\trsp = 0x%016lx", r.rbp, r.rsp);
     os << buf << std::endl;
-    sprintf(buf, "r8  = 0x%016llx\tr9  = 0x%016llx", r.r8, r.r9);
+    sprintf(buf, "r8  = 0x%016lx\tr9  = 0x%016lx", r.r8, r.r9);
     os << buf << std::endl;
-    sprintf(buf, "r10 = 0x%016llx\tr11 = 0x%016llx", r.r10, r.r11);
+    sprintf(buf, "r10 = 0x%016lx\tr11 = 0x%016lx", r.r10, r.r11);
     os << buf << std::endl;
-    sprintf(buf, "r12 = 0x%016llx\tr13 = 0x%016llx", r.r12, r.r13);
+    sprintf(buf, "r12 = 0x%016lx\tr13 = 0x%016lx", r.r12, r.r13);
     os << buf << std::endl;
-    sprintf(buf, "r14 = 0x%016llx\tr15 = 0x%016llx", r.r14, r.r15);
+    sprintf(buf, "r14 = 0x%016lx\tr15 = 0x%016lx", r.r14, r.r15);
     os << buf << std::endl;
-    sprintf(buf, "rip = 0x%016llx\trfl = 0x%016llx", r.rip, r.rflags);
+    sprintf(buf, "rip = 0x%016lx\trfl = 0x%016lx", r.rip, r.rflags);
     os << buf << std::endl;
-    sprintf(buf, "cs = 0x%08llx\tds = 0x%08llx", r.cs, r.ds);
+    sprintf(buf, "cs = 0x%08x\tds = 0x%08x", r.cs, r.ds);
     os << buf << std::endl;
-    sprintf(buf, "es = 0x%08llx\tfs = 0x%08llx", r.es, r.fs);
+    sprintf(buf, "es = 0x%08x\tfs = 0x%08x", r.es, r.fs);
     os << buf << std::endl;
-    sprintf(buf, "gs = 0x%08llx\tss = 0x%08llx", r.gs, r.ss);
+    sprintf(buf, "gs = 0x%08x\tss = 0x%08x", r.gs, r.ss);
     os << buf << std::endl;
-    sprintf(buf, "cr0 = 0x%016llx\tcr2 = 0x%016llx", r.cr0, r.cr2);
+    sprintf(buf, "cr0 = 0x%016lx\tcr2 = 0x%016lx", r.cr0, r.cr2);
     os << buf << std::endl;
-    sprintf(buf, "cr3 = 0x%016llx\tcr4 = 0x%016llx", r.cr3, r.cr4);
+    sprintf(buf, "cr3 = 0x%016lx\tcr4 = 0x%016lx", r.cr3, r.cr4);
     os << buf << std::endl;
-    sprintf(buf, "cr8 = 0x%016llx", r.cr8);
+    sprintf(buf, "cr8 = 0x%016lx", r.cr8);
     os << buf << std::endl;
-    sprintf(buf, "idt :  base = 0x%016llx\tlimit = %08llx", r.idt.base, r.idt.limit);
+    sprintf(buf, "idt :  base = 0x%016lx\tlimit = 0x%08x", r.idt.base, r.idt.limit);
     os << buf << std::endl;
-    sprintf(buf, "gdt :  base = 0x%016llx\tlimit = %08llx", r.gdt.base, r.gdt.limit);
+    sprintf(buf, "gdt :  base = 0x%016lx\tlimit = 0x%08x", r.gdt.base, r.gdt.limit);
     os << buf << std::endl;
-    sprintf(buf, "efer = 0x%016llx", r.efer);
+    sprintf(buf, "efer = 0x%016lx", r.efer);
     os << buf << std::endl;
     return os;
 }
