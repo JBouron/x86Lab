@@ -1,5 +1,5 @@
 CC := g++
-CXXFLAGS := -O3
+CXXFLAGS := -O3 -std=c++20
 
 CPP_FILES := $(shell find . -type f -name "*.cpp")
 OBJ_FILES := $(CPP_FILES:%.cpp=%.o)

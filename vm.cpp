@@ -534,6 +534,6 @@ std::ostream& operator<<(std::ostream& os, X86Lab::Vm::RegisterFile const& r) {
     sprintf(buf, "gdt :  base = 0x%016lx\tlimit = 0x%08x", r.gdt.base, r.gdt.limit);
     os << buf << std::endl;
     sprintf(buf, "efer = 0x%016lx", r.efer);
-    os << buf << std::endl;
+    os << buf;
     return os;
 }

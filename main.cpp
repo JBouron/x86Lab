@@ -42,11 +42,27 @@ static void run(Mode const mode, std::string const& fileName) {
         vm.enable64BitsMode();
     }
 
-    // Run.
-    std::cout << vm.getRegisters() << std::endl;
+    X86Lab::Assembler::InstructionMap const& map(code.getInstructionMap());
+    // Print the current state of the registers and the next instruction to be
+    // executed.
+    auto const printRegsAndInstruction([&]() {
+        X86Lab::Vm::RegisterFile const regs(vm.getRegisters());
+        std::cout << regs << std::endl;
+        auto const entry(map.mapInstructionPointer(regs.rip));
+        if (!!entry) {
+            std::cout << std::dec;
+            std::cout << "Line        = " << entry.line << std::endl;
+            std::cout << "Next instr. = " << entry.instruction << std::endl;
+        }
+    });
+
+    // Run step by step.
+    printRegsAndInstruction();
     while (vm.state() == X86Lab::Vm::State::Runnable) {
+        std::cout << "--------------------------------------------------------";
+        std::cout << std::endl;
         vm.step();
-        std::cout << vm.getRegisters() << std::endl;
+        printRegsAndInstruction();
     }
 }
 
