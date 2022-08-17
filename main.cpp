@@ -1,7 +1,7 @@
 #include <iostream>
 
-#include "vm.hpp"
-#include "assembler.hpp"
+#include <x86lab/vm.hpp>
+#include <x86lab/assembler.hpp>
 
 static void help() {
     std::cerr << "X86Lab: A x86 instruction analyzer" << std::endl;

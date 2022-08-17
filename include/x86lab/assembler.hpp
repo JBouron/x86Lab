@@ -2,7 +2,7 @@
 #include <vector>
 #include <map>
 
-#include "util.hpp"
+#include <x86lab/util.hpp>
 
 namespace X86Lab::Assembler {
 // Holds the mapping between instructions and addresses and source line numbers.

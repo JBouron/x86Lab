@@ -1,4 +1,4 @@
-#include "vm.hpp"
+#include <x86lab/vm.hpp>
 #include <memory>
 
 namespace X86Lab {

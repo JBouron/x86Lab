@@ -1,4 +1,4 @@
-#include "assembler.hpp"
+#include <x86lab/assembler.hpp>
 #include <fstream>
 #include <array>
 #include <iostream>

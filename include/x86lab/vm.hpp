@@ -6,7 +6,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include "util.hpp"
+#include <x86lab/util.hpp>
 
 namespace X86Lab {
 
