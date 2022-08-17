@@ -1,3 +1,4 @@
+#pragma once
 #include <iostream>
 #include <linux/kvm.h>
 #include <sys/ioctl.h>

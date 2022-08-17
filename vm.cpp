@@ -486,12 +486,6 @@ void* Vm::addPhysicalMemory(u64 const offset, size_t const size) {
         .memory_size = size,
         .userspace_addr = reinterpret_cast<u64>(userspace),
     });
-    std::cout << std::hex;
-    std::cout << kvmMap.slot << std::endl;
-    std::cout << kvmMap.flags << std::endl;
-    std::cout << kvmMap.guest_phys_addr << std::endl;
-    std::cout << kvmMap.memory_size << std::endl;
-    std::cout << kvmMap.userspace_addr << std::endl;
     if (::ioctl(vmFd, KVM_SET_USER_MEMORY_REGION, &kvmMap) == -1) {
         throw KvmError("Failed to map memory to guest", errno);
     }

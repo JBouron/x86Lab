@@ -1,6 +1,7 @@
 #include <iostream>
 
 #include "vm.hpp"
+#include "assembler.hpp"
 
 void demoWithDirectPM() {
     // Shows how to start a VM directly in 32-bit protected mode.
@@ -26,32 +27,34 @@ void demoWithDirectPM() {
     }
 }
 
-void demoWithDirect64BitMode() {
-    // Shows how to start a VM directly in 64-bit mode.
+void run64Bits(std::string const& fileName) {
+    // Run code in `fileName` starting directly in 64 bits mode.
+    X86Lab::Assembler::Code const code(X86Lab::Assembler::assemble(fileName));
     X86Lab::Vm vm(1);
+    vm.loadCode(code.machineCode(), code.size());
+    vm.enable64BitsMode();
 
-    // mov rax, 0xAABBCCDDEEFF0011
-    uint8_t const code[] = {
-        0x48, 0xB8, 0x11, 0x00, 0xFF, 0xEE, 0xDD, 0xCC, 0xBB, 0xAA
-    };
-
-    try {
-        vm.loadCode(code, sizeof(code));
-        vm.enable64BitsMode();
-
+    std::cout << vm.getRegisters() << std::endl;
+    while (vm.state() == X86Lab::Vm::State::Runnable) {
+        vm.step();
         std::cout << vm.getRegisters() << std::endl;
-        while (vm.state() == X86Lab::Vm::State::Runnable) {
-            vm.step();
-            std::cout << vm.getRegisters() << std::endl;
-        }
-    } catch (X86Lab::Error const& error) {
-        std::perror((std::string("X86Lab::Error: ")+error.what()).c_str());
-        std::exit(1);
     }
 }
 
-
 int main(int argc, char **argv) {
-    demoWithDirect64BitMode();
+    if (argc < 2) {
+        std::cerr << "Not enough arguments, expected path to code" << std::endl;
+        std::exit(1);
+    }
+
+    std::string const fileName(argv[1]);
+
+    try {
+        run64Bits(fileName);
+    } catch (X86Lab::Error const& error) {
+        std::string const msg(error.what());
+        std::perror(("Error: " + msg).c_str());
+        std::exit(1);
+    }
     return 0;
 }
