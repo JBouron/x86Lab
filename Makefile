@@ -20,8 +20,15 @@ include .deps
 
 # Executable.
 x86lab: main.o $(OBJ_FILES)
-	$(CC) -o $@ $^
+	$(CC) $(CXXFLAGS) -o $@ $^
+
+# Tests.
+test: x86labTests
+	./x86labTests
+
+x86labTests: tests.o $(OBJ_FILES)
+	$(CC) $(CXXFLAGS) -o $@ $^
 
 .PHONY: clean
 clean:
-	rm -f x86lab .deps $(OBJ_FILES) main.o
+	rm -f x86lab .deps $(OBJ_FILES) main.o x86labTests tests.o
