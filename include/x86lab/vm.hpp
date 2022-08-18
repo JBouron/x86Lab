@@ -211,6 +211,8 @@ private:
     void *memory;
     // The current state of the KVM.
     State currState;
+    // Is the state of the VM currently real mode.
+    bool isRealMode;
 };
 }
 

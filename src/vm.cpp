@@ -11,7 +11,8 @@ Vm::Vm(u64 const memorySize) :
     usedMemorySlots(0),
     physicalMemorySize(memorySize * PAGE_SIZE),
     memory(addPhysicalMemory(0x0, physicalMemorySize)),
-    currState(State::NoCodeLoaded)
+    currState(State::NoCodeLoaded),
+    isRealMode(true)
     {
     // Disable any MSR access filtering. KVM's doc indicate that if this is not
     // done then the default behaviour is used. However it's not really clear if
@@ -204,18 +205,36 @@ void Vm::setRegisters(RegisterFile const& registerValues) {
     // them in the call to KVM_SET_SREGS.
     kvm_sregs sregs(kvmGetSRegs());
 
-    sregs.cs.selector = registerValues.cs,
-    sregs.ds.selector = registerValues.ds,
-    sregs.es.selector = registerValues.es,
-    sregs.fs.selector = registerValues.fs,
-    sregs.gs.selector = registerValues.gs,
-    sregs.ss.selector = registerValues.ss,
-    sregs.cr0 = registerValues.cr0,
-    sregs.cr2 = registerValues.cr2,
-    sregs.cr3 = registerValues.cr3,
-    sregs.cr4 = registerValues.cr4,
-    sregs.cr8 = registerValues.cr8,
-    sregs.efer = registerValues.efer,
+    sregs.cs.selector = registerValues.cs;
+    sregs.ds.selector = registerValues.ds;
+    sregs.es.selector = registerValues.es;
+    sregs.fs.selector = registerValues.fs;
+    sregs.gs.selector = registerValues.gs;
+    sregs.ss.selector = registerValues.ss;
+
+    if (isRealMode) {
+        // When operating in real-mode it seems that we need to manually set the
+        // hidden base and limit of each segment register.
+        sregs.cs.base = sregs.cs.selector << 4;
+        sregs.cs.limit = 0xFFFF;
+        sregs.ds.base = sregs.ds.selector << 4;
+        sregs.ds.limit = 0xFFFF;
+        sregs.es.base = sregs.es.selector << 4;
+        sregs.es.limit = 0xFFFF;
+        sregs.fs.base = sregs.fs.selector << 4;
+        sregs.fs.limit = 0xFFFF;
+        sregs.gs.base = sregs.gs.selector << 4;
+        sregs.gs.limit = 0xFFFF;
+        sregs.ss.base = sregs.ss.selector << 4;
+        sregs.ss.limit = 0xFFFF;
+    }
+
+    sregs.cr0 = registerValues.cr0;
+    sregs.cr2 = registerValues.cr2;
+    sregs.cr3 = registerValues.cr3;
+    sregs.cr4 = registerValues.cr4;
+    sregs.cr8 = registerValues.cr8;
+    sregs.efer = registerValues.efer;
     sregs.idt.base = registerValues.idt.base;
     sregs.idt.limit = registerValues.idt.limit;
     sregs.gdt.base = registerValues.gdt.base;
@@ -225,6 +244,7 @@ void Vm::setRegisters(RegisterFile const& registerValues) {
 }
 
 void Vm::enableProtectedMode() {
+    isRealMode = false;
     kvm_sregs sregs(kvmGetSRegs());
 
     // Enable protected mode.
@@ -355,6 +375,7 @@ void Vm::enable64BitsMode() {
     sregs.ss = sregs.ds;
 
     kvmSetSRegs(sregs);
+    isRealMode = false;
 }
 
 void* Vm::getMemory() {

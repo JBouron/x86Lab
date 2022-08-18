@@ -20,6 +20,72 @@ static std::string writeCode(std::string const& code) {
     return fileName;
 }
 
+// Set the segment registers before starting the VM.
+static void testSetSegmentRegisters() {
+    // The easiest way to test changing segment registers is to run in real mode
+    // so that we don't have to create and set-up a GDT.
+    // The goal is to set the segment registers to non-null values hence why
+    // start is at offset 6 * 16, CS then must be set to 0x6 in order to start
+    // execution at the `start` label.
+    // For other segment register, set them to point to the first, second,
+    // third, ... pair of QWORDS. Then dereference them to read into a register.
+    std::string const assembly(R"(BITS 16
+dq 0x0, 0x0
+
+dq 0xA, 0x0
+
+dq 0xB, 0x0
+
+dq 0xC, 0x0
+
+dq 0xD, 0x0
+
+dq 0xE, 0x0
+
+start:
+    xor di, di
+    mov ax, [ds:di]
+    mov bx, [es:di]
+    mov cx, [fs:di]
+    mov dx, [gs:di]
+    mov di, [ss:di]
+    hlt
+)");
+
+    std::string const fileName(writeCode(assembly));
+    X86Lab::Assembler::Code const code(X86Lab::Assembler::assemble(fileName));
+
+    // Create the VM and load the code in memory.
+    X86Lab::Vm vm(1);
+    vm.loadCode(code.machineCode(), code.size());
+
+    X86Lab::Vm::RegisterFile regs(vm.getRegisters());
+
+    regs.cs = 0x6;
+    regs.ds = 0x1;
+    regs.es = 0x2;
+    regs.fs = 0x3;
+    regs.gs = 0x4;
+    regs.ss = 0x5;
+
+    vm.setRegisters(regs);
+
+    // Now run the whole code.
+    while (vm.state() == X86Lab::Vm::State::Runnable) {
+        vm.step();
+    }
+
+    // Assert on the registers values, since each register was written into with
+    // a different segment override, each register should have a different
+    // value.
+    regs = vm.getRegisters();
+    assert(regs.rax == 0xA);
+    assert(regs.rbx == 0xB);
+    assert(regs.rcx == 0xC);
+    assert(regs.rdx == 0xD);
+    assert(regs.rdi == 0xE);
+}
+
 // Sets all the general purpose registers on a VM before starting it. Run some
 // code that modifies each register, and read their value back once the
 // execution is done. Assert on the read values.
@@ -133,6 +199,7 @@ hlt)");
 using TestFunction = void (*)();
 std::vector<TestFunction> const tests({
     testSetRegisters,
+    testSetSegmentRegisters,
 });
 
 int main(int argc, char **argv) {
