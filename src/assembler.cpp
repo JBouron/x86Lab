@@ -80,11 +80,14 @@ static InstructionMap* parseListFile(std::string const& listFilePath) {
             // In both case we simply skip the line.
             continue;
         }
+        // header is the line, offset and machine code, e.g. everything before
+        // the instruction listing.
+        std::string const header(line.substr(0, instructionListingStartIdx));
         std::string const instruction(line.substr(instructionListingStartIdx));
 
         // There is always a line number.
         u64 lineNumber;
-        std::istringstream iss(line);
+        std::istringstream iss(header);
         iss >> lineNumber;
         if (!iss) {
             throw Error("Failed to parse listfile", errno);
@@ -95,7 +98,7 @@ static InstructionMap* parseListFile(std::string const& listFilePath) {
         u64 offset;
         iss >> std::hex;
         iss >> offset;
-        if (iss) {
+        if (!!iss) {
             // There is an offset, hence this could be an instruction (not
             // necessarily, as this could also be a directive inserting a value
             // at a specific address).

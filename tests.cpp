@@ -20,6 +20,51 @@ static std::string writeCode(std::string const& code) {
     return fileName;
 }
 
+// Check that the NASM's listfile parsing is correctly implemented.
+static void testInstructionMap() {
+    // Make the code interesting parsing-wise by adding long comments,
+    // instruction whose machine code span two lines (lwpins), empty lines and
+    // some directives.
+    std::string const assembly(R"(
+BITS 64
+
+; Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor
+mov rax, 0xDEAD
+ror rax, 4
+
+xor rax, rax
+cpuid
+hlt
+lwpins rax,[fs:eax+ebx+0xDEAD],0xBEEF
+
+mov rax, [0x0]
+
+dq 0xDEADBEEF
+)");
+
+    std::string const fileName(writeCode(assembly));
+    X86Lab::Assembler::Code const code(X86Lab::Assembler::assemble(fileName));
+    X86Lab::Assembler::InstructionMap const& map(code.getInstructionMap());
+
+    assert(map.mapInstructionPointer(0x00000000) ==
+           X86Lab::Assembler::InstructionMap::Entry(6, "mov rax, 0xDEAD"));
+    assert(map.mapInstructionPointer(0x00000005) ==
+           X86Lab::Assembler::InstructionMap::Entry(7, "ror rax, 4"));
+    assert(map.mapInstructionPointer(0x00000009) ==
+           X86Lab::Assembler::InstructionMap::Entry(9, "xor rax, rax"));
+    assert(map.mapInstructionPointer(0x0000000c) ==
+           X86Lab::Assembler::InstructionMap::Entry(10, "cpuid"));
+    assert(map.mapInstructionPointer(0x0000000e) ==
+           X86Lab::Assembler::InstructionMap::Entry(11, "hlt"));
+    assert(map.mapInstructionPointer(0x0000000f) ==
+           X86Lab::Assembler::InstructionMap::Entry(11,
+           "lwpins rax,[fs:eax+ebx+0xDEAD],0xBEEF"));
+    assert(map.mapInstructionPointer(0x0000001f) ==
+           X86Lab::Assembler::InstructionMap::Entry(14, "mov rax, [0x0]"));
+    assert(map.mapInstructionPointer(0x00000027) ==
+           X86Lab::Assembler::InstructionMap::Entry(16, "dd 0xDEADBEEF"));
+}
+
 // Set the segment registers before starting the VM.
 static void testSetSegmentRegisters() {
     // The easiest way to test changing segment registers is to run in real mode
@@ -198,6 +243,7 @@ hlt)");
 // All the tests to be ran.
 using TestFunction = void (*)();
 std::vector<TestFunction> const tests({
+    testInstructionMap,
     testSetRegisters,
     testSetSegmentRegisters,
 });
