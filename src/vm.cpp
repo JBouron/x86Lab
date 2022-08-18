@@ -517,11 +517,11 @@ std::ostream& operator<<(std::ostream& os, X86Lab::Vm::RegisterFile const& r) {
     os << buf << std::endl;
     sprintf(buf, "rip = 0x%016lx\trfl = 0x%016lx", r.rip, r.rflags);
     os << buf << std::endl;
-    sprintf(buf, "cs = 0x%08x\tds = 0x%08x", r.cs, r.ds);
+    sprintf(buf, "cs = 0x%04x\tds = 0x%04x", r.cs, r.ds);
     os << buf << std::endl;
-    sprintf(buf, "es = 0x%08x\tfs = 0x%08x", r.es, r.fs);
+    sprintf(buf, "es = 0x%04x\tfs = 0x%04x", r.es, r.fs);
     os << buf << std::endl;
-    sprintf(buf, "gs = 0x%08x\tss = 0x%08x", r.gs, r.ss);
+    sprintf(buf, "gs = 0x%04x\tss = 0x%04x", r.gs, r.ss);
     os << buf << std::endl;
     sprintf(buf, "cr0 = 0x%016lx\tcr2 = 0x%016lx", r.cr0, r.cr2);
     os << buf << std::endl;
