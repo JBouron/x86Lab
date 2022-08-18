@@ -41,6 +41,7 @@ shl r12, 0x8
 shl r13, 0x8
 shl r14, 0x8
 shl r15, 0x8
+cli
 hlt)");
     std::string const fileName(writeCode(assembly));
     X86Lab::Assembler::Code const code(X86Lab::Assembler::assemble(fileName));
@@ -68,6 +69,9 @@ hlt)");
     regs.r13 = 0x0013131313131313ULL;
     regs.r14 = 0x0014141414141414ULL;
     regs.r15 = 0x0015151515151515ULL;
+    // For EFLAGS, set only the interrupt bit. The assembly code will disable
+    // it. Note: Bit 1 is hardcoded to 1 per x86 spec.
+    regs.rflags = (1 << 9) | (1 << 1);
     vm.setRegisters(regs);
 
     // Check that the registers have been set as expected.
@@ -88,6 +92,10 @@ hlt)");
     assert(regs.r13 == 0x0013131313131313ULL);
     assert(regs.r14 == 0x0014141414141414ULL);
     assert(regs.r15 == 0x0015151515151515ULL);
+    assert(regs.rflags == (1 << 9) | (1 << 1));
+
+    // The RIP must point to address 0.
+    assert(regs.rip == 0x0);
 
     // Now run the whole code.
     while (vm.state() == X86Lab::Vm::State::Runnable) {
@@ -112,6 +120,12 @@ hlt)");
     assert(regs.r13 == 0x1313131313131300ULL);
     assert(regs.r14 == 0x1414141414141400ULL);
     assert(regs.r15 == 0x1515151515151500ULL);
+    // Interrupts should have beed disabled hence bit 9 should be un-set. The
+    // last instruction "shl r15, 8" Should have set the parity flag (bit 2).
+    assert(regs.rflags == (1 << 2) | (1 << 1));
+
+    // RIP must point after the last instruction (HLT).
+    assert(regs.rip == code.size());
 }
 
 
