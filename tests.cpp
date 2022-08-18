@@ -239,6 +239,53 @@ hlt)");
     assert(regs.rip == code.size());
 }
 
+// Check that setting the GDT works as expected and the reported GDT base and
+// limit is correct in getRegisters().
+static void testSetGdt() {
+    // The following code simply reads at offset 0 in the data segment. The
+    // first QWORD 0xA will be at the base of the segment, hence the value that
+    // is expected to be written in EAX. The other QWORDs are defining the GDT
+    // to be used.
+    // magical qword defines a flat data segment.
+    std::string const assembly(R"(BITS 32
+mov     ax, 0x8
+mov     ds, ax
+mov     eax, [0]
+hlt
+
+dq      0xDEADBEEF
+
+dq      0x0
+dq      0x004f9a00000cffff)");
+    // Counting the NULL entry.
+    u32 const numGdtEntries(2);
+
+    std::string const fileName(writeCode(assembly));
+    X86Lab::Assembler::Code const code(X86Lab::Assembler::assemble(fileName));
+
+    // Create the VM and load the code in memory.
+    X86Lab::Vm vm(1);
+    vm.loadCode(code.machineCode(), code.size());
+    vm.enableProtectedMode();
+
+    X86Lab::Vm::RegisterFile regs(vm.getRegisters());
+    regs.rax = 0x0;
+    // The GDT is at the end of the code, hence base = code end - N * 8 where 8
+    // is the number of entries in the GDT.
+    regs.gdt.base = code.size() - numGdtEntries * 8;
+    regs.gdt.limit = numGdtEntries * 8 - 1;
+    vm.setRegisters(regs);
+
+    // Now run the whole code.
+    while (vm.state() == X86Lab::Vm::State::Runnable) {
+        vm.step();
+    }
+
+    regs = vm.getRegisters();
+    assert(regs.rax == 0xDEADBEEF);
+    assert(regs.gdt.base == code.size() - numGdtEntries * 8);
+    assert(regs.gdt.limit == numGdtEntries * 8 - 1);
+}
 
 // All the tests to be ran.
 using TestFunction = void (*)();
@@ -246,6 +293,7 @@ std::vector<TestFunction> const tests({
     testInstructionMap,
     testSetRegisters,
     testSetSegmentRegisters,
+    testSetGdt,
 });
 
 int main(int argc, char **argv) {
