@@ -270,7 +270,7 @@ dq      0x004f9a00000cffff)");
 
     X86Lab::Vm::RegisterFile regs(vm.getRegisters());
     regs.rax = 0x0;
-    // The GDT is at the end of the code, hence base = code end - N * 8 where 8
+    // The GDT is at the end of the code, hence base = code end - N * 8 where N
     // is the number of entries in the GDT.
     regs.gdt.base = code.size() - numGdtEntries * 8;
     regs.gdt.limit = numGdtEntries * 8 - 1;
@@ -287,6 +287,58 @@ dq      0x004f9a00000cffff)");
     assert(regs.gdt.limit == numGdtEntries * 8 - 1);
 }
 
+// Test setting the IDTR before starting up the VM.
+static void testSetIdt() {
+    // Use real-mode so that the format of the IDT is easy.
+    // The goal here is to trigger an interrupt (vector 1) for which the handler
+    // sets ax to a specific value.
+    std::string const assembly(R"(BITS 16
+xor     ax, ax
+xor     bx, bx
+int     0x2
+
+handler1:
+mov     ax, 0xDEAD
+hlt
+
+idt:
+; IDT[0], unused.
+dd      0x0
+dd      0x0
+; IDT[1], pointing to handler1 using 0x0 as segment selector.
+dw      handler1, 0x0
+)");
+
+    u32 const numIdtEntries(3);
+
+    std::string const fileName(writeCode(assembly));
+    X86Lab::Assembler::Code const code(X86Lab::Assembler::assemble(fileName));
+
+    // Create the VM and load the code in memory.
+    X86Lab::Vm vm(1);
+    vm.loadCode(code.machineCode(), code.size());
+
+    X86Lab::Vm::RegisterFile regs(vm.getRegisters());
+    // Handling interrupts requires a stack. Setup the stack a few bytes above
+    // the end of the code. 32 bytes should be more than enough.
+    regs.rsp = code.size() + 32;
+    // The IDT is at the end of the code, hence base = code end - N * 4, where N
+    // is the number of entries in the IDT.
+    regs.idt.base = code.size() - numIdtEntries * 4;
+    regs.idt.limit = numIdtEntries * 4 - 1;
+    vm.setRegisters(regs);
+
+    // Now run the whole code.
+    while (vm.state() == X86Lab::Vm::State::Runnable) {
+        vm.step();
+    }
+
+    regs = vm.getRegisters();
+    assert(regs.rax == 0xDEAD);
+    assert(regs.idt.base == code.size() - numIdtEntries * 4);
+    assert(regs.idt.limit == numIdtEntries * 4 - 1);
+}
+
 // All the tests to be ran.
 using TestFunction = void (*)();
 std::vector<TestFunction> const tests({
@@ -294,6 +346,7 @@ std::vector<TestFunction> const tests({
     testSetRegisters,
     testSetSegmentRegisters,
     testSetGdt,
+    testSetIdt,
 });
 
 int main(int argc, char **argv) {
