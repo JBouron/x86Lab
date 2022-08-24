@@ -148,7 +148,6 @@ Code assemble(std::string const& fileName) {
     // Insert the bytes of the file into `code`.
     std::vector<u8> code(outputFileSize, 0x00);
     output.read(reinterpret_cast<char*>(code.data()), code.size());
-    std::cout << "Machine code is " << code.size() << " bytes long" << std::endl;
 
     InstructionMap const * const map(parseListFile(listFileName));
     return Code(std::move(code), map);

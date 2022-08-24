@@ -215,5 +215,3 @@ private:
     bool isRealMode;
 };
 }
-
-std::ostream& operator<<(std::ostream& os, X86Lab::Vm::RegisterFile const& r);

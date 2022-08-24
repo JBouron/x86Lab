@@ -38,7 +38,6 @@ Vm::Vm(u64 const memorySize) :
     size_t const structSize(sizeof(kvm_cpuid2) + nent * sizeof(kvm_cpuid_entry2));
     kvm_cpuid2 * const kvmCpuid(reinterpret_cast<kvm_cpuid2*>(malloc(structSize)));
     std::memset(kvmCpuid, 0x0, structSize);
-    std::cout << "kvmCpuid = " << kvmCpuid << std::endl;
     assert(!!kvmCpuid);
     kvmCpuid->nent = nent;
     if (::ioctl(kvmHandle, KVM_GET_SUPPORTED_CPUID, kvmCpuid) == -1) {
@@ -443,7 +442,6 @@ Vm::State Vm::step() {
         throw KvmError("Cannot run VM", errno);
     }
 
-    std::cout << "Exit reason = " << exitReasonToString[kvmRun.exit_reason] << std::endl;
     if (kvmRun.exit_reason == KVM_EXIT_DEBUG) {
         // The execution stopped after one step, we are still runnable.
         currState = State::Runnable;
@@ -513,48 +511,4 @@ void* Vm::addPhysicalMemory(u64 const offset, size_t const size) {
     usedMemorySlots++;
     return userspace;
 }
-}
-
-std::ostream& operator<<(std::ostream& os, X86Lab::Vm::RegisterFile const& r) {
-    // TODO: Fix this mess.
-    char buf[512];
-    sprintf(buf, "-- @ rip = 0x%016lx --------------------------", r.rip);
-    os << buf << std::endl;
-    sprintf(buf, "rax = 0x%016lx\trbx = 0x%016lx", r.rax, r.rbx);
-    os << buf << std::endl;
-    sprintf(buf, "rcx = 0x%016lx\trdx = 0x%016lx", r.rcx, r.rdx);
-    os << buf << std::endl;
-    sprintf(buf, "rdi = 0x%016lx\trsi = 0x%016lx", r.rdi, r.rsi);
-    os << buf << std::endl;
-    sprintf(buf, "rbp = 0x%016lx\trsp = 0x%016lx", r.rbp, r.rsp);
-    os << buf << std::endl;
-    sprintf(buf, "r8  = 0x%016lx\tr9  = 0x%016lx", r.r8, r.r9);
-    os << buf << std::endl;
-    sprintf(buf, "r10 = 0x%016lx\tr11 = 0x%016lx", r.r10, r.r11);
-    os << buf << std::endl;
-    sprintf(buf, "r12 = 0x%016lx\tr13 = 0x%016lx", r.r12, r.r13);
-    os << buf << std::endl;
-    sprintf(buf, "r14 = 0x%016lx\tr15 = 0x%016lx", r.r14, r.r15);
-    os << buf << std::endl;
-    sprintf(buf, "rip = 0x%016lx\trfl = 0x%016lx", r.rip, r.rflags);
-    os << buf << std::endl;
-    sprintf(buf, "cs = 0x%04x\tds = 0x%04x", r.cs, r.ds);
-    os << buf << std::endl;
-    sprintf(buf, "es = 0x%04x\tfs = 0x%04x", r.es, r.fs);
-    os << buf << std::endl;
-    sprintf(buf, "gs = 0x%04x\tss = 0x%04x", r.gs, r.ss);
-    os << buf << std::endl;
-    sprintf(buf, "cr0 = 0x%016lx\tcr2 = 0x%016lx", r.cr0, r.cr2);
-    os << buf << std::endl;
-    sprintf(buf, "cr3 = 0x%016lx\tcr4 = 0x%016lx", r.cr3, r.cr4);
-    os << buf << std::endl;
-    sprintf(buf, "cr8 = 0x%016lx", r.cr8);
-    os << buf << std::endl;
-    sprintf(buf, "idt :  base = 0x%016lx\tlimit = 0x%08x", r.idt.base, r.idt.limit);
-    os << buf << std::endl;
-    sprintf(buf, "gdt :  base = 0x%016lx\tlimit = 0x%08x", r.gdt.base, r.gdt.limit);
-    os << buf << std::endl;
-    sprintf(buf, "efer = 0x%016lx", r.efer);
-    os << buf;
-    return os;
 }
