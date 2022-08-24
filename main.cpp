@@ -27,7 +27,7 @@ enum class Mode {
 
 static void run(Mode const mode, std::string const& fileName) {
     // Run code in `fileName` starting directly in 64 bits mode.
-    X86Lab::Ui::Manager * ui(new X86Lab::Ui::Cli());
+    X86Lab::Ui::Backend * ui(new X86Lab::Ui::Cli());
 
     // Assemble the code.
     ui->log("Assembling code in " + fileName);

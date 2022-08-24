@@ -24,15 +24,15 @@ Vm::RegisterFile const& State::registers() const {
     return *regValues;
 }
 
-Action Manager::waitForNextAction() {
+Action Backend::waitForNextAction() {
     return doWaitForNextAction();
 }
 
-void Manager::update(State const& newState) {
+void Backend::update(State const& newState) {
     doUpdate(newState);
 }
 
-void Manager::log(std::string const& msg) {
+void Backend::log(std::string const& msg) {
     // Gotta love std::chrono boilerplate.
     std::chrono::time_point<std::chrono::system_clock> const date(
         std::chrono::system_clock::now());

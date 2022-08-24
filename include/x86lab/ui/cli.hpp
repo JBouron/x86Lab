@@ -6,7 +6,7 @@ namespace X86Lab::Ui {
 // Implementation of Manager for "raw" output in stdout. Each update prints out
 // the current value of the registers. The code is stepped through until the Vm
 // is no longer runnable.
-class Cli : public Manager {
+class Cli : public Backend {
 private:
     // Implementation of waitForNextAction.
     virtual Action doWaitForNextAction();
