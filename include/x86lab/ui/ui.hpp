@@ -55,6 +55,9 @@ private:
 // a sub-class that actually implements the input/output routines.
 class Backend {
 public:
+    // Virtual destructor to ensure calling derived destructors.
+    virtual ~Backend() = 0;
+
     // Wait for the next action from the user.
     // @return: The action selected by the user.
     Action waitForNextAction();

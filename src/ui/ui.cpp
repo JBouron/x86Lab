@@ -24,6 +24,8 @@ Vm::RegisterFile const& State::registers() const {
     return *regValues;
 }
 
+Backend::~Backend() {}
+
 Action Backend::waitForNextAction() {
     return doWaitForNextAction();
 }
