@@ -6,9 +6,14 @@
 #include <sstream>
 
 namespace X86Lab::Assembler {
-Code::Code(std::vector<u8> && code, InstructionMap const* const map) :
+Code::Code(std::string const& fileName, std::vector<u8> && code, InstructionMap const* const map) :
+    file(fileName),
     code(code),
     map(map) {}
+
+std::string Code::fileName() const {
+    return file;
+}
 
 u8 const* Code::machineCode() const {
     return code.data();
@@ -150,6 +155,6 @@ Code assemble(std::string const& fileName) {
     output.read(reinterpret_cast<char*>(code.data()), code.size());
 
     InstructionMap const * const map(parseListFile(listFileName));
-    return Code(std::move(code), map);
+    return Code(fileName, std::move(code), map);
 }
 }

@@ -1,5 +1,6 @@
 CC := g++
 CXXFLAGS := -Iinclude/ -O3 -std=c++20
+LDLIBS := -lncurses
 
 CPP_FILES := $(shell find src/ -type f -name "*.cpp")
 OBJ_FILES := $(CPP_FILES:%.cpp=%.o)
@@ -20,14 +21,14 @@ include .deps
 
 # Executable.
 x86lab: main.o $(OBJ_FILES)
-	$(CC) $(CXXFLAGS) -o $@ $^
+	$(CC) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
 
 # Tests.
 test: x86labTests
 	./x86labTests
 
 x86labTests: tests.o $(OBJ_FILES)
-	$(CC) $(CXXFLAGS) -o $@ $^
+	$(CC) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
 
 .PHONY: clean
 clean:

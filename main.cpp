@@ -3,6 +3,7 @@
 #include <x86lab/vm.hpp>
 #include <x86lab/assembler.hpp>
 #include <x86lab/ui/cli.hpp>
+#include <x86lab/ui/tui.hpp>
 
 static void help() {
     std::cerr << "X86Lab: A x86 instruction analyzer" << std::endl;
@@ -27,7 +28,7 @@ enum class Mode {
 
 static void run(Mode const mode, std::string const& fileName) {
     // Run code in `fileName` starting directly in 64 bits mode.
-    X86Lab::Ui::Backend * ui(new X86Lab::Ui::Cli());
+    X86Lab::Ui::Backend * ui(new X86Lab::Ui::Tui());
 
     // Assemble the code.
     ui->log("Assembling code in " + fileName);
@@ -70,8 +71,25 @@ static void run(Mode const mode, std::string const& fileName) {
         if (nextAction == X86Lab::Ui::Action::Step) {
             if (vm.state() != X86Lab::Vm::State::Runnable) {
                 // The VM is no longer runnable, cannot satisfy the action.
-                ui->log("Error: Cannot step execution, Vm no longer runnable");
-                return;
+                std::string reason;
+                switch (vm.state()) {
+                    case X86Lab::Vm::State::Shutdown:
+                        reason = "VM shutdown";
+                        break;
+                    case X86Lab::Vm::State::Halted:
+                        reason = "VM halted";
+                        break;
+                    case X86Lab::Vm::State::NoCodeLoaded:
+                        reason = "No code loaded";
+                        break;
+                    case X86Lab::Vm::State::SingleStepError:
+                        reason = "Single step error";
+                        break;
+                    default:
+                        reason = "Unknown";
+                        break;
+                }
+                ui->log("Vm no longer runnable, reason: " + reason);
             } else {
                 numSteps ++;
                 vm.step();
@@ -83,6 +101,7 @@ static void run(Mode const mode, std::string const& fileName) {
     }
     ui->log("Reached end of execution after "
             + std::to_string(numSteps) + " instructions");
+    delete ui;
 }
 
 int main(int argc, char **argv) {

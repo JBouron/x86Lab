@@ -72,12 +72,19 @@ public:
     // @return: const ref to the map.
     InstructionMap const& getInstructionMap() const;
 
+    // Get the filename.
+    std::string fileName() const;
+
 private:
     // Create an instance of Code. This constructor is meant to be used by the
     // assemble() function only, hence why it is private and assemble() is
     // friend of this class.
-    Code(std::vector<u8> && code, InstructionMap const * const map);
+    Code(std::string const& fileName,
+         std::vector<u8> && code,
+         InstructionMap const * const map);
     friend Code assemble(std::string const& code);
+
+    std::string const file;
 
     // Raw machine code.
     std::vector<u8> const code;
