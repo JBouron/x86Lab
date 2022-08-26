@@ -6,14 +6,12 @@
 #include <sstream>
 
 namespace X86Lab::Assembler {
-Code::Code(std::string const& fileName, std::vector<u8> && code, InstructionMap const* const map) :
+Code::Code(std::string const& fileName,
+           std::vector<u8> const& code,
+           InstructionMap const& map) :
     file(fileName),
     code(code),
     map(map) {}
-
-std::string Code::fileName() const {
-    return file;
-}
 
 u8 const* Code::machineCode() const {
     return code.data();
@@ -24,13 +22,17 @@ u64 Code::size() const {
 }
 
 InstructionMap const& Code::getInstructionMap() const {
-    return *map;
+    return map;
+}
+
+std::string const& Code::fileName() const {
+    return file;
 }
 
 // This sets sentinel to the default value.
 InstructionMap::InstructionMap() {}
 
-InstructionMap::Entry::Entry() : line(0), instruction("UNKNOWN") {}
+InstructionMap::Entry::Entry() : Entry(0, "UNKNOWN") {}
 
 InstructionMap::Entry::Entry(u64 const line, std::string const& instruction) :
     line(line),
@@ -125,7 +127,7 @@ static std::string getUniqueFileName() {
     return std::tmpnam(NULL);
 }
 
-Code assemble(std::string const& fileName) {
+std::shared_ptr<Code> assemble(std::string const& fileName) {
     // Output file to be used by the NASM assembler.
     std::string const outputFileName(getUniqueFileName());
     // Use binary output format ("-f bin") so that the resulting code only
@@ -155,6 +157,9 @@ Code assemble(std::string const& fileName) {
     output.read(reinterpret_cast<char*>(code.data()), code.size());
 
     InstructionMap const * const map(parseListFile(listFileName));
-    return Code(fileName, std::move(code), map);
+    std::shared_ptr<Code> const ptr(new Code(fileName, std::move(code), *map));
+    // Code got a copy of the map.
+    delete map;
+    return ptr;
 }
 }

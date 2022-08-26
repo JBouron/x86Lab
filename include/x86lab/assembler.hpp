@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <map>
+#include <memory>
 
 #include <x86lab/util.hpp>
 
@@ -33,8 +34,8 @@ public:
         // source file, false otherwise.
         operator bool() const;
 
-        u64 const line;
-        std::string const instruction;
+        u64 line;
+        std::string instruction;
     };
 
     // Add an entry to the Instruction map.
@@ -73,29 +74,29 @@ public:
     InstructionMap const& getInstructionMap() const;
 
     // Get the filename.
-    std::string fileName() const;
+    std::string const& fileName() const;
 
 private:
     // Create an instance of Code. This constructor is meant to be used by the
     // assemble() function only, hence why it is private and assemble() is
     // friend of this class.
     Code(std::string const& fileName,
-         std::vector<u8> && code,
-         InstructionMap const * const map);
-    friend Code assemble(std::string const& code);
+         std::vector<u8> const& code,
+         InstructionMap const& map);
+    friend std::shared_ptr<Code> assemble(std::string const& code);
 
-    std::string const file;
+    std::string file;
 
     // Raw machine code.
-    std::vector<u8> const code;
+    std::vector<u8> code;
 
     // Map of instruction pointer to instruction / line numbers.
-    InstructionMap const * const map;
+    InstructionMap map;
 };
 
 // Assembles the code in `fileName`. The content of the file must be understood
 // by NASM.
 // @param fileName: Path to the file to compile.
 // @return: The resulting Code instance.
-Code assemble(std::string const& fileName);
+std::shared_ptr<Code> assemble(std::string const& fileName);
 }

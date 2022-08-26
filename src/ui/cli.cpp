@@ -35,7 +35,7 @@ void Cli::doUpdate(State const& newState) {
     printf("efer = 0x%016lx\n", r.efer);
 
     // Print information on the instruction being executed.
-    Assembler::InstructionMap const& map(newState.code().getInstructionMap());
+    Assembler::InstructionMap const& map(newState.code()->getInstructionMap());
     auto const entry(map.mapInstructionPointer(r.rip));
     if (!!entry) {
         std::cout << "Line        = " << entry.line << std::endl;

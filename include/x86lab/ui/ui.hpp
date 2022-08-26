@@ -2,6 +2,7 @@
 #include <x86lab/vm.hpp>
 #include <x86lab/assembler.hpp>
 #include <string>
+#include <memory>
 
 // Gather logic around user-interface.
 // UI implementation revolves around having two methods:
@@ -33,22 +34,22 @@ public:
     // latest value for each registers of the VM. This pointer is not owned by
     // this class.
     State(Vm::State const runState,
-          Assembler::Code const * const code, 
-          Vm::RegisterFile const * const registerValues);
+          std::shared_ptr<Assembler::Code const> const code, 
+          Vm::RegisterFile const& registerValues);
 
     // Get the VM's run state.
     Vm::State state() const;
 
     // Get the code loaded in the Vm.
-    Assembler::Code const& code() const;
+    std::shared_ptr<Assembler::Code const> code() const;
 
     // Get the values of the registers.
     Vm::RegisterFile const& registers() const;
 
 private:
     Vm::State runState;
-    Assembler::Code const * loadedCode;
-    Vm::RegisterFile const * regValues;
+    std::shared_ptr<Assembler::Code const> loadedCode;
+    Vm::RegisterFile regValues;
 };
 
 // Backend implementation of the user interface. This is meant to be derived in

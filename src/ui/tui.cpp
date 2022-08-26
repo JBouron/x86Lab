@@ -63,10 +63,10 @@ Action Tui::doWaitForNextAction() {
 void Tui::doUpdate(State const& newState) {
     doUpdateRegWin(newState.registers());
 
-    Assembler::InstructionMap const& map(newState.code().getInstructionMap());
+    Assembler::InstructionMap const& map(newState.code()->getInstructionMap());
     auto const entry(map.mapInstructionPointer(newState.registers().rip));
     if (!!entry) {
-        doUpdateCodeWin(newState.code().fileName(), entry.line);
+        doUpdateCodeWin(newState.code()->fileName(), entry.line);
     }
     refresh();
 }
