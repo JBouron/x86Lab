@@ -82,8 +82,8 @@ private:
     // friend of this class.
     Code(std::string const& fileName,
          std::vector<u8> const& code,
-         InstructionMap const& map);
-    friend std::shared_ptr<Code> assemble(std::string const& code);
+         std::unique_ptr<InstructionMap const> map);
+    friend std::unique_ptr<Code> assemble(std::string const& code);
 
     std::string file;
 
@@ -91,12 +91,12 @@ private:
     std::vector<u8> code;
 
     // Map of instruction pointer to instruction / line numbers.
-    InstructionMap map;
+    std::unique_ptr<InstructionMap const> map;
 };
 
 // Assembles the code in `fileName`. The content of the file must be understood
 // by NASM.
 // @param fileName: Path to the file to compile.
 // @return: The resulting Code instance.
-std::shared_ptr<Code> assemble(std::string const& fileName);
+std::unique_ptr<Code> assemble(std::string const& fileName);
 }
