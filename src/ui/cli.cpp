@@ -11,7 +11,7 @@ Action Cli::doWaitForNextAction() {
 
 void Cli::doUpdate(State const& newState) {
     // Simply dump the state in stdout.
-    Vm::RegisterFile const& r(newState.registers());
+    Vm::State::Registers const& r(newState.registers());
 
     // Using printf for hexadecimal output is just way simpler than std::cout.
     printf("-- @ rip = 0x%016lx --------------------------\n", r.rip);
@@ -45,7 +45,7 @@ void Cli::doUpdate(State const& newState) {
         std::cout << "Next instr. = ?" << std::endl;
     }
 
-    isVmRunnable = newState.state() == Vm::State::Runnable;
+    isVmRunnable = newState.state() == Vm::OperatingState::Runnable;
 }
 
 void Cli::doLog(std::string const& msg) {

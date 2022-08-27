@@ -3,15 +3,15 @@
 
 namespace X86Lab {
 
-Vm::VmState::Registers const& Vm::VmState::registers() const {
+Vm::State::Registers const& Vm::State::registers() const {
     return regs;
 }
 
-Vm::VmState::Memory const& Vm::VmState::memory() const {
+Vm::State::Memory const& Vm::State::memory() const {
     return mem;
 }
 
-Vm::VmState::VmState(Registers const& regs, Memory && mem) :
+Vm::State::State(Registers const& regs, Memory && mem) :
     regs(regs),
     mem(std::move(mem)) {}
 
@@ -23,7 +23,7 @@ Vm::Vm(u64 const memorySize) :
     usedMemorySlots(0),
     physicalMemorySize(memorySize * PAGE_SIZE),
     memory(addPhysicalMemory(0x0, physicalMemorySize)),
-    currState(State::NoCodeLoaded),
+    currState(OperatingState::NoCodeLoaded),
     isRealMode(true)
     {
     // Disable any MSR access filtering. KVM's doc indicate that if this is not
@@ -108,7 +108,7 @@ void Vm::loadCode(u8 const * const shellCode, u64 const shellCodeSize) {
     std::memcpy(memory, shellCode, shellCodeSize);
 
     // Set RIP to first instruction.
-    RegisterFile regs(getRegisters());
+    State::Registers regs(getRegisters());
     regs.rip = 0x0;
     setRegisters(regs);
 
@@ -133,25 +133,25 @@ void Vm::loadCode(u8 const * const shellCode, u64 const shellCodeSize) {
     kvmSetSRegs(sregs);
 
     // The KVM is now runnable.
-    currState = State::Runnable;
+    currState = OperatingState::Runnable;
 }
 
-std::unique_ptr<Vm::VmState> Vm::getState() const {
-    RegisterFile const regs(getRegisters());
+std::unique_ptr<Vm::State> Vm::getState() const {
+    State::Registers const regs(getRegisters());
     u8 * const rawPtr(new u8[physicalMemorySize]);
     std::memcpy(rawPtr, memory, physicalMemorySize);
-    Vm::VmState::Memory mem({
+    Vm::State::Memory mem({
         .data = std::unique_ptr<u8>(rawPtr),
         .size = physicalMemorySize,
     });
-    return std::unique_ptr<Vm::VmState>(new Vm::VmState(regs, std::move(mem)));
+    return std::unique_ptr<Vm::State>(new Vm::State(regs, std::move(mem)));
 }
 
-Vm::RegisterFile Vm::getRegisters() const {
+Vm::State::Registers Vm::getRegisters() const {
     kvm_regs const regs(kvmGetRegs());
     kvm_sregs const sregs(kvmGetSRegs());
 
-    RegisterFile const regFile({
+    State::Registers const regFile({
         .rax = regs.rax,
         .rbx = regs.rbx,
         .rcx = regs.rcx,
@@ -199,7 +199,7 @@ Vm::RegisterFile Vm::getRegisters() const {
     return regFile;
 }
 
-void Vm::setRegisters(RegisterFile const& registerValues) {
+void Vm::setRegisters(State::Registers const& registerValues) {
     kvm_regs const regs({
         .rax    = registerValues.rax,
         .rbx    = registerValues.rbx,
@@ -222,7 +222,7 @@ void Vm::setRegisters(RegisterFile const& registerValues) {
     });
     kvmSetRegs(regs);
 
-    // RegisterFile doesn't quite contain all the values that kvm_sregs has.
+    // State::Registers doesn't quite contain all the values that kvm_sregs has.
     // Hence for those missing values, we read the current kvm_sregs to re-use
     // them in the call to KVM_SET_SREGS.
     kvm_sregs sregs(kvmGetSRegs());
@@ -404,7 +404,7 @@ void* Vm::getMemory() {
     return memory;
 }
 
-Vm::State Vm::state() const {
+Vm::OperatingState Vm::state() const {
     return currState;
 }
 
@@ -447,7 +447,7 @@ constexpr char const* exitReasonToString[] = {
     [KVM_EXIT_RISCV_SBI      ] = "KVM_EXIT_RISCV_SBI",
 };
 
-Vm::State Vm::step() {
+Vm::OperatingState Vm::step() {
     // Enable debug on guest vcpu in order to be able to do single
     // stepping.
     // The documentation is sparse on this, but it seems that single
@@ -456,27 +456,27 @@ Vm::State Vm::step() {
     kvm_guest_debug dbg;
     dbg.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_SINGLESTEP;
     if (::ioctl(vcpuFd, KVM_SET_GUEST_DEBUG, &dbg) == -1) {
-        currState = State::SingleStepError;
+        currState = OperatingState::SingleStepError;
         throw KvmError("Cannot set guest debug", errno);
     }
 
     if (::ioctl(vcpuFd, KVM_RUN, NULL) != 0) {
-        currState = State::SingleStepError;
+        currState = OperatingState::SingleStepError;
         throw KvmError("Cannot run VM", errno);
     }
 
     if (kvmRun.exit_reason == KVM_EXIT_DEBUG) {
         // The execution stopped after one step, we are still runnable.
-        currState = State::Runnable;
+        currState = OperatingState::Runnable;
     } else if (kvmRun.exit_reason == KVM_EXIT_SHUTDOWN) {
         // Execution stopped the host. This is most likely a triple-fault hehe.
-        currState = State::Shutdown;
+        currState = OperatingState::Shutdown;
     } else if (kvmRun.exit_reason == KVM_EXIT_HLT) {
         // The single step executed a halt instruction.
-        currState = State::Halted;
+        currState = OperatingState::Halted;
     } else {
         // For now consider everything else as an error.
-        currState = State::SingleStepError;
+        currState = OperatingState::SingleStepError;
     }
     return currState;
 }

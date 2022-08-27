@@ -71,7 +71,7 @@ void Tui::doUpdate(State const& newState) {
     refresh();
 }
 
-void Tui::doUpdateRegWin(Vm::RegisterFile const& newRegs) {
+void Tui::doUpdateRegWin(Vm::State::Registers const& newRegs) {
     Window& w(*regWin);
     w.clearAndResetCursor();
     char buf[512];

@@ -23,7 +23,7 @@ private:
 
     // Update the register windows with the new register values.
     // @param newRegs: latest register values.
-    void doUpdateRegWin(Vm::RegisterFile const& newRegs);
+    void doUpdateRegWin(Vm::State::Registers const& newRegs);
  
     // Update the code window.
     // @param fileName: The source code file path.
@@ -152,7 +152,7 @@ private:
     // The previous values of the registers.
     // FIXME: This should not be here, doUpdate should pass the old and new
     // states instead.
-    Vm::RegisterFile prevRegs;
+    Vm::State::Registers prevRegs;
 };
 
 }

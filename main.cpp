@@ -67,20 +67,20 @@ static void run(Mode const mode, std::string const& fileName) {
     X86Lab::Ui::Action nextAction(ui->waitForNextAction());
     while (nextAction != X86Lab::Ui::Action::Quit) {
         if (nextAction == X86Lab::Ui::Action::Step) {
-            if (vm.state() != X86Lab::Vm::State::Runnable) {
+            if (vm.state() != X86Lab::Vm::OperatingState::Runnable) {
                 // The VM is no longer runnable, cannot satisfy the action.
                 std::string reason;
                 switch (vm.state()) {
-                    case X86Lab::Vm::State::Shutdown:
+                    case X86Lab::Vm::OperatingState::Shutdown:
                         reason = "VM shutdown";
                         break;
-                    case X86Lab::Vm::State::Halted:
+                    case X86Lab::Vm::OperatingState::Halted:
                         reason = "VM halted";
                         break;
-                    case X86Lab::Vm::State::NoCodeLoaded:
+                    case X86Lab::Vm::OperatingState::NoCodeLoaded:
                         reason = "No code loaded";
                         break;
-                    case X86Lab::Vm::State::SingleStepError:
+                    case X86Lab::Vm::OperatingState::SingleStepError:
                         reason = "Single step error";
                         break;
                     default:

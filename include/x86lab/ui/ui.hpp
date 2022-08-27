@@ -30,26 +30,26 @@ public:
     // Construct a State.
     // @param runState: The VM's runnable state.
     // @param code: The code that is currently loaded and running on the Vm.
-    // @param registerValues: Pointer on a Vm::RegisterFile containing the
+    // @param registerValues: Pointer on a Vm::State::Registers containing the
     // latest value for each registers of the VM. This pointer is not owned by
     // this class.
-    State(Vm::State const runState,
+    State(Vm::OperatingState const runState,
           std::shared_ptr<Assembler::Code const> const code, 
-          Vm::RegisterFile const& registerValues);
+          Vm::State::Registers const& registerValues);
 
-    // Get the VM's run state.
-    Vm::State state() const;
+    // Get the VM's run OperatingState.
+    Vm::OperatingState state() const;
 
     // Get the code loaded in the Vm.
     std::shared_ptr<Assembler::Code const> code() const;
 
     // Get the values of the registers.
-    Vm::RegisterFile const& registers() const;
+    Vm::State::Registers const& registers() const;
 
 private:
-    Vm::State runState;
+    Vm::OperatingState runState;
     std::shared_ptr<Assembler::Code const> loadedCode;
-    Vm::RegisterFile regValues;
+    Vm::State::Registers regValues;
 };
 
 // Backend implementation of the user interface. This is meant to be derived in

@@ -5,14 +5,14 @@
 
 namespace X86Lab::Ui {
 
-State::State(Vm::State const runState,
+State::State(Vm::OperatingState const runState,
              std::shared_ptr<Assembler::Code const> const code,
-             Vm::RegisterFile const& registerValues) :
+             Vm::State::Registers const& registerValues) :
     runState(runState), 
     loadedCode(code),
     regValues(registerValues) {}
 
-Vm::State State::state() const {
+Vm::OperatingState State::state() const {
     return runState;
 }
 
@@ -20,7 +20,7 @@ std::shared_ptr<Assembler::Code const> State::code() const {
     return loadedCode;
 }
 
-Vm::RegisterFile const& State::registers() const {
+Vm::State::Registers const& State::registers() const {
     return regValues;
 }
 

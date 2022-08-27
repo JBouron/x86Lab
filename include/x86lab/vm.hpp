@@ -20,7 +20,7 @@ class Vm {
 public:
     // Contains a snapshot of the internal state of a VM (registers, memory,
     // ...).
-    class VmState {
+    class State {
     public:
         // Holds the values of all the registers of a VM.
         struct Registers {
@@ -70,10 +70,10 @@ public:
         // Get the physical memory dump of this snapshot.
         Memory const& memory() const;
 
-        // Build a VmState snapshot.
+        // Build a State snapshot.
         // @param regs: The register values.
         // @param mem: The dump of the physical memory.
-        VmState(Registers const& regs, Memory && mem);
+        State(Registers const& regs, Memory && mem);
 
     private:
         Registers regs;
@@ -98,21 +98,20 @@ public:
 
     // Get a copy of this VM's state. Note that this is an expensive operation
     // since it creates a full copy of the VM's physical memory.
-    // @return: An instance of VmState containing the full state of this Vm.
-    std::unique_ptr<Vm::VmState> getState() const;
+    // @return: An instance of State containing the full state of this Vm.
+    std::unique_ptr<Vm::State> getState() const;
 
-    using RegisterFile = VmState::Registers;
     // Get the current values of the registers on the vCpu.
-    // @return: A complete RegisterFile holding the values of the register as of
+    // @return: A complete State::Registers holding the values of the register as of
     // the time after the last instruction was executed.
-    RegisterFile getRegisters() const;
+    State::Registers getRegisters() const;
 
     // Set the values of the registers on the vCpu. Not that all registers are
     // set.
-    // @param registerValues: A RegisterFile holding all the values that should
+    // @param registerValues: A State::Registers holding all the values that should
     // be written.
     // @throws: KvmError in case of any KVM ioctl error.
-    void setRegisters(RegisterFile const& registerValues);
+    void setRegisters(State::Registers const& registerValues);
 
     // Enable 32-bit protected mode on the vCpu. This does NOT enable paging.
     // Note that using this function does not setup a GDT. It merely sets the
@@ -140,7 +139,7 @@ public:
     void *getMemory();
 
     // State of the KVM.
-    enum class State {
+    enum class OperatingState {
         // The KVM is runnable.
         Runnable,
         // The KVM has been shutdown.
@@ -153,14 +152,15 @@ public:
         SingleStepError,
     };
 
-    // Get the state of the KVM.
-    // @return: An enum State indicating if the KVM is runnable or not.
-    State state() const;
+    // Get the OperatingState of the KVM.
+    // @return: An enum OperatingState indicating if the KVM is runnable or not.
+    OperatingState state() const;
 
     // Execute a single instruction in the KVM.
-    // @return: The state of the KVM after executing a single instruction.
+    // @return: The OperatingState of the KVM after executing a single
+    // instruction.
     // @throws: KvmError in case of any KVM ioctl error.
-    State step();
+    OperatingState step();
 
 private:
     // The following methods are used as part of the constructor. They allow to
@@ -240,8 +240,8 @@ private:
     size_t physicalMemorySize;
     // Pointer to start of physical memory on the host (e.g. userspace).
     void *memory;
-    // The current state of the KVM.
-    State currState;
+    // The current OperatingState of the KVM.
+    OperatingState currState;
     // Is the state of the VM currently real mode.
     bool isRealMode;
 };
