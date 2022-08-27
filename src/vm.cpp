@@ -3,6 +3,18 @@
 
 namespace X86Lab {
 
+Vm::VmState::Registers const& Vm::VmState::registers() const {
+    return regs;
+}
+
+Vm::VmState::Memory const& Vm::VmState::memory() const {
+    return mem;
+}
+
+Vm::VmState::VmState(Registers const& regs, Memory && mem) :
+    regs(regs),
+    mem(std::move(mem)) {}
+
 Vm::Vm(u64 const memorySize) :
     kvmHandle(getKvmHandle()),
     vmFd(createKvmVm(kvmHandle)),
@@ -122,6 +134,17 @@ void Vm::loadCode(u8 const * const shellCode, u64 const shellCodeSize) {
 
     // The KVM is now runnable.
     currState = State::Runnable;
+}
+
+std::unique_ptr<Vm::VmState> Vm::getState() const {
+    RegisterFile const regs(getRegisters());
+    u8 * const rawPtr(new u8[physicalMemorySize]);
+    std::memcpy(rawPtr, memory, physicalMemorySize);
+    Vm::VmState::Memory mem({
+        .data = std::unique_ptr<u8>(rawPtr),
+        .size = physicalMemorySize,
+    });
+    return std::unique_ptr<Vm::VmState>(new Vm::VmState(regs, std::move(mem)));
 }
 
 Vm::RegisterFile Vm::getRegisters() const {

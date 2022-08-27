@@ -5,6 +5,7 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <memory>
 
 #include <x86lab/util.hpp>
 
@@ -17,6 +18,68 @@ constexpr size_t PAGE_SIZE(4096);
 // analyze a small piece of assembly.
 class Vm {
 public:
+    // Contains a snapshot of the internal state of a VM (registers, memory,
+    // ...).
+    class VmState {
+    public:
+        // Holds the values of all the registers of a VM.
+        struct Registers {
+            // General-purpose registers.
+            u64 rax; u64 rbx; u64 rcx; u64 rdx;
+            u64 rdi; u64 rsi; u64 rsp; u64 rbp;
+            u64 r8;  u64 r9;  u64 r10; u64 r11;
+            u64 r12; u64 r13; u64 r14; u64 r15;
+
+            // Special registers.
+            u64 rflags; u64 rip;
+
+
+            // Segment registers.
+            u16 cs; u16 ds; u16 es;
+            u16 fs; u16 gs; u16 ss;
+
+            // Control registers.
+            u64 cr0; u64 cr2;
+            u64 cr3; u64 cr4;
+            u64 cr8;
+            u64 efer;
+
+            // Tables.
+            struct Table {
+                u64 base;
+                u16 limit;
+            };
+            Table idt;
+            Table gdt;
+
+            // TODO: Include floating point registers.
+        };
+
+        // Snapshot of the VM's physical memory.
+        struct Memory {
+            // Pointer to the memory snapshot, this is a _copy_ of the full
+            // physical memory, changing this as no effect on the running VM.
+            std::unique_ptr<u8> data;
+            // The size of the memory snapshot (and data) in bytes.
+            u64 size;
+        };
+
+        // Get the value of the registers of this snapshot.
+        Registers const& registers() const;
+
+        // Get the physical memory dump of this snapshot.
+        Memory const& memory() const;
+
+        // Build a VmState snapshot.
+        // @param regs: The register values.
+        // @param mem: The dump of the physical memory.
+        VmState(Registers const& regs, Memory && mem);
+
+    private:
+        Registers regs;
+        Memory mem;
+    };
+
     // Creates a KVM with the given amount of memory.
     // @param memorySize: The amount of physical memory in multiple of PAGE_SIZE
     // to allocate for the VM.
@@ -33,44 +96,12 @@ public:
     // @param shellCodeSize: The size of the code to be loaded in bytes.
     void loadCode(u8 const * const shellCode, u64 const shellCodeSize);
 
-    // Dump of register values.
-    struct RegisterFile {
-        // General-purpose registers.
-        u64 rax; u64 rbx; u64 rcx; u64 rdx;
-        u64 rdi; u64 rsi; u64 rsp; u64 rbp;
-        u64 r8;  u64 r9;  u64 r10; u64 r11;
-        u64 r12; u64 r13; u64 r14; u64 r15;
+    // Get a copy of this VM's state. Note that this is an expensive operation
+    // since it creates a full copy of the VM's physical memory.
+    // @return: An instance of VmState containing the full state of this Vm.
+    std::unique_ptr<Vm::VmState> getState() const;
 
-        // Special registers.
-        u64 rflags;
-        u64 rip;
-
-
-        // Segment registers.
-        u16 cs;
-        u16 ds;
-        u16 es;
-        u16 fs;
-        u16 gs;
-        u16 ss;
-
-        // Control registers.
-        u64 cr0;
-        u64 cr2;
-        u64 cr3;
-        u64 cr4;
-        u64 cr8;
-        u64 efer;
-
-        // Tables.
-        struct Table {
-            u64 base;
-            u16 limit;
-        };
-        Table idt;
-        Table gdt;
-    };
-
+    using RegisterFile = VmState::Registers;
     // Get the current values of the registers on the vCpu.
     // @return: A complete RegisterFile holding the values of the register as of
     // the time after the last instruction was executed.
