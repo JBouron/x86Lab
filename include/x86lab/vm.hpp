@@ -154,7 +154,7 @@ public:
 
     // Get the OperatingState of the KVM.
     // @return: An enum OperatingState indicating if the KVM is runnable or not.
-    OperatingState state() const;
+    OperatingState operatingState() const;
 
     // Execute a single instruction in the KVM.
     // @return: The OperatingState of the KVM after executing a single

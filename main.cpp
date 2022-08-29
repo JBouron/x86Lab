@@ -56,7 +56,7 @@ static void run(Mode const mode, std::string const& fileName) {
     }
 
     auto const getState([&]() {
-        return X86Lab::Ui::State(vm.state(), code, vm.getRegisters());
+        return X86Lab::Ui::State(vm.operatingState(), code, vm.getRegisters());
     });
 
     ui->update(getState());
@@ -67,10 +67,10 @@ static void run(Mode const mode, std::string const& fileName) {
     X86Lab::Ui::Action nextAction(ui->waitForNextAction());
     while (nextAction != X86Lab::Ui::Action::Quit) {
         if (nextAction == X86Lab::Ui::Action::Step) {
-            if (vm.state() != X86Lab::Vm::OperatingState::Runnable) {
+            if (vm.operatingState() != X86Lab::Vm::OperatingState::Runnable) {
                 // The VM is no longer runnable, cannot satisfy the action.
                 std::string reason;
-                switch (vm.state()) {
+                switch (vm.operatingState()) {
                     case X86Lab::Vm::OperatingState::Shutdown:
                         reason = "VM shutdown";
                         break;

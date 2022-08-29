@@ -404,7 +404,7 @@ void* Vm::getMemory() {
     return memory;
 }
 
-Vm::OperatingState Vm::state() const {
+Vm::OperatingState Vm::operatingState() const {
     return currState;
 }
 
