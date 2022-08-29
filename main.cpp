@@ -4,6 +4,9 @@
 #include <x86lab/assembler.hpp>
 #include <x86lab/ui/cli.hpp>
 #include <x86lab/ui/tui.hpp>
+#include <x86lab/runner.hpp>
+
+using namespace X86Lab;
 
 static void help() {
     std::cerr << "X86Lab: A x86 instruction analyzer" << std::endl;
@@ -28,89 +31,34 @@ enum class Mode {
 
 static void run(Mode const mode, std::string const& fileName) {
     // Run code in `fileName` starting directly in 64 bits mode.
-    X86Lab::Ui::Backend * ui(new X86Lab::Ui::Tui());
+    std::shared_ptr<Ui::Backend> ui(new Ui::Tui());
 
     // Assemble the code.
     ui->log("Assembling code in " + fileName);
-    std::shared_ptr<X86Lab::Assembler::Code> const code(
-        X86Lab::Assembler::assemble(fileName));
+    std::shared_ptr<Assembler::Code> const code(Assembler::assemble(fileName));
     ui->log("Assembled code is " + std::to_string(code->size()) + " bytes");
 
     // Create the VM and load the code in memory.
-    X86Lab::Vm vm(1);
+    std::shared_ptr<Vm> vm(new Vm(1));
     ui->log("Vm created");
 
-    vm.loadCode(code->machineCode(), code->size());
+    vm->loadCode(code->machineCode(), code->size());
     ui->log("Code loaded");
 
     // Enable the requested mode. Note that VMs start in real mode by default
     // hence nothing to do if mode == Mode::RealMode.
     if (mode == Mode::ProtectedMode) {
         ui->log("Enable protected mode on VM");
-        vm.enableProtectedMode();
+        vm->enableProtectedMode();
     } else if (mode == Mode::LongMode) {
         ui->log("Enable long mode on VM");
-        vm.enable64BitsMode();
+        vm->enable64BitsMode();
     } else {
         ui->log("Vm is using default 16 bit real mode");
     }
 
-    // Create the base snapshot.
-    std::shared_ptr<X86Lab::Snapshot> latestSnapshot(
-        ::new X86Lab::Snapshot(vm.getState()));
-
-    auto const updateUi([&]() {
-        X86Lab::Ui::State const s(vm.operatingState(), code, latestSnapshot);
-        ui->update(s);
-    });
-
-    updateUi();
-
-    // Number of steps executed so far.
-    u64 numSteps(0);
-
-    X86Lab::Ui::Action nextAction(ui->waitForNextAction());
-    while (nextAction != X86Lab::Ui::Action::Quit) {
-        if (nextAction == X86Lab::Ui::Action::Step) {
-            if (vm.operatingState() != X86Lab::Vm::OperatingState::Runnable) {
-                // The VM is no longer runnable, cannot satisfy the action.
-                std::string reason;
-                switch (vm.operatingState()) {
-                    case X86Lab::Vm::OperatingState::Shutdown:
-                        reason = "VM shutdown";
-                        break;
-                    case X86Lab::Vm::OperatingState::Halted:
-                        reason = "VM halted";
-                        break;
-                    case X86Lab::Vm::OperatingState::NoCodeLoaded:
-                        reason = "No code loaded";
-                        break;
-                    case X86Lab::Vm::OperatingState::SingleStepError:
-                        reason = "Single step error";
-                        break;
-                    default:
-                        reason = "Unknown";
-                        break;
-                }
-                ui->log("Vm no longer runnable, reason: " + reason);
-            } else {
-                numSteps ++;
-                vm.step();
-
-                // Build a snapshot on top of the previous one.
-                std::shared_ptr<X86Lab::Snapshot> const newSnapshot(
-                    ::new X86Lab::Snapshot(latestSnapshot, vm.getState()));
-                latestSnapshot = newSnapshot;
-
-                updateUi();
-            }
-        }
-
-        nextAction = ui->waitForNextAction();
-    }
-    ui->log("Reached end of execution after "
-            + std::to_string(numSteps) + " instructions");
-    delete ui;
+    Runner runner(vm, code, ui);
+    runner.run();
 }
 
 int main(int argc, char **argv) {
@@ -143,7 +91,7 @@ int main(int argc, char **argv) {
 
     try {
         run(startMode, fileName);
-    } catch (X86Lab::Error const& error) {
+    } catch (Error const& error) {
         std::string const msg(error.what());
         std::perror(("Error: " + msg).c_str());
         std::exit(1);
