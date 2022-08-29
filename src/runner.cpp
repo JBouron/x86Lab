@@ -6,13 +6,14 @@ Runner::Runner(std::shared_ptr<Vm> const vm,
                std::shared_ptr<Ui::Backend> const ui) :
     vm(vm),
     code(code),
-    ui(ui) {
+    ui(ui),
+    historyIndex(0) {
     if (vm->operatingState() == Vm::OperatingState::NoCodeLoaded) {
         vm->loadCode(code->machineCode(), code->size());
     }
 
     // Setup the base snapshot.
-    lastSnapshot = std::shared_ptr<Snapshot>(::new Snapshot(vm->getState()));
+    history.push_back(std::shared_ptr<Snapshot>(new Snapshot(vm->getState())));
 }
 
 void Runner::run() {
@@ -33,7 +34,18 @@ void Runner::run() {
 }
 
 void Runner::updateUi() {
-    ui->update(Ui::State(vm->operatingState(), code, lastSnapshot));
+    assert(historyIndex < history.size());
+    ui->update(Ui::State(vm->operatingState(), code, history[historyIndex]));
+}
+
+void Runner::updateLastSnapshot() {
+    // Adding a new snapshot can only be done if we are running the vm, eg. not
+    // looking at an old state.
+    assert(historyIndex == history.size() - 1);
+    std::shared_ptr<Snapshot> const nextSnapshot(
+        ::new Snapshot(history[historyIndex], vm->getState()));
+    history.push_back(nextSnapshot);
+    historyIndex ++;
 }
 
 void Runner::processAction(Ui::Action const action) {
@@ -41,6 +53,9 @@ void Runner::processAction(Ui::Action const action) {
     switch (action) {
         case Ui::Action::Step:
             doStep();
+            break;
+        case Ui::Action::ReverseStep:
+            doReverseStep();
             break;
         default:
             break;
@@ -69,12 +84,22 @@ void Runner::doStep() {
                 break;
         }
         ui->log("Vm no longer runnable, reason: " + reason);
+    } else if (historyIndex != history.size() - 1) {
+        // We are not on the latest state but instead are looking at an old
+        // state back in time. Stepping is merely done as incrementing the
+        // historyIndex.
+        historyIndex ++;
     } else {
+        // We are looking at the latest state of the VM, going to the next state
+        // requires actually executing the next instruction.
         vm->step();
-        // Insert new snapshot and update lastSnapshot pointer.
-        std::shared_ptr<Snapshot> const newSnapshot(
-            ::new Snapshot(lastSnapshot, vm->getState()));
-        lastSnapshot = newSnapshot;
+        updateLastSnapshot();
+    }
+}
+
+void Runner::doReverseStep() {
+    if (!!historyIndex) {
+        historyIndex --;
     }
 }
 }

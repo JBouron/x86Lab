@@ -17,6 +17,8 @@ namespace X86Lab::Ui {
 enum class Action {
     // Run the next instruction in the VM.
     Step,
+    // Go backward one instruction in the execution flow.
+    ReverseStep,
     // Terminate the process.
     Quit,
 };

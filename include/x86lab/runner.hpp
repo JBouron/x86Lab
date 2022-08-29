@@ -1,6 +1,7 @@
 #pragma once
 #include <x86lab/vm.hpp>
 #include <x86lab/ui/ui.hpp>
+#include <vector>
 
 namespace X86Lab {
 // Implements the main-loop logic of the program: wait for user input, process
@@ -25,12 +26,22 @@ private:
     std::shared_ptr<Assembler::Code const> code;
     std::shared_ptr<Ui::Backend> ui;
 
-    // Points to the lastest snapshot of the VM. Initially the initial state of
+    // The full execution history. This vector contains the snapshots of the Vm
+    // after each instruction/step in-order. Entry i points to the snapshot
+    // after executing the ith instruction. Entry 0 is the initial condition of
     // the VM.
-    std::shared_ptr<X86Lab::Snapshot> lastSnapshot;
+    // This vector is used to implement reverse stepping in an efficient way.
+    std::vector<std::shared_ptr<Snapshot>> history;
+
+    // This is the index of the currently shown state in the history. If this
+    // index == history.size() then this is the lastest state of the VM.
+    u64 historyIndex;
 
     // Update the UI with the latest state of the VM.
     void updateUi();
+
+    // Get a new snapshot of the VM state and update the lastSnapshot pointer.
+    void updateLastSnapshot();
 
     // Process the next action.
     // @param action: The action to process.
@@ -38,5 +49,8 @@ private:
 
     // Process an Action::Step request.
     void doStep();
+
+    // Process an Action::ReverseStep request.
+    void doReverseStep();
 };
 }

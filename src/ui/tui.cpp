@@ -53,6 +53,8 @@ Action Tui::doWaitForNextAction() {
     while (true) {
         if (nextChar == 's') {
             return Action::Step;
+        } else if (nextChar == 'r') {
+            return Action::ReverseStep;
         } else if (nextChar == 'q') {
             return Action::Quit;
         }
