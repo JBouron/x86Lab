@@ -7,10 +7,10 @@ namespace X86Lab::Ui {
 
 State::State(Vm::OperatingState const runState,
              std::shared_ptr<Assembler::Code const> const code,
-             Vm::State::Registers const& registerValues) :
+             std::shared_ptr<Snapshot const> const snapshot) :
     runState(runState), 
     loadedCode(code),
-    regValues(registerValues) {}
+    latestSnapshot(snapshot) {}
 
 Vm::OperatingState State::state() const {
     return runState;
@@ -20,8 +20,16 @@ std::shared_ptr<Assembler::Code const> State::code() const {
     return loadedCode;
 }
 
-Vm::State::Registers const& State::registers() const {
-    return regValues;
+Snapshot::Registers const& State::registers() const {
+    return latestSnapshot->registers();
+}
+
+Snapshot::Registers State::prevRegisters() const {
+    if (latestSnapshot->hasBase()) {
+        return latestSnapshot->base()->registers();
+    } else {
+        return Snapshot::Registers{};
+    }
 }
 
 Backend::~Backend() {}

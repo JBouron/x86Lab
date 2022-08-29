@@ -55,11 +55,16 @@ static void run(Mode const mode, std::string const& fileName) {
         ui->log("Vm is using default 16 bit real mode");
     }
 
-    auto const getState([&]() {
-        return X86Lab::Ui::State(vm.operatingState(), code, vm.getRegisters());
+    // Create the base snapshot.
+    std::shared_ptr<X86Lab::Snapshot> latestSnapshot(
+        ::new X86Lab::Snapshot(vm.getState()));
+
+    auto const updateUi([&]() {
+        X86Lab::Ui::State const s(vm.operatingState(), code, latestSnapshot);
+        ui->update(s);
     });
 
-    ui->update(getState());
+    updateUi();
 
     // Number of steps executed so far.
     u64 numSteps(0);
@@ -91,7 +96,13 @@ static void run(Mode const mode, std::string const& fileName) {
             } else {
                 numSteps ++;
                 vm.step();
-                ui->update(getState());
+
+                // Build a snapshot on top of the previous one.
+                std::shared_ptr<X86Lab::Snapshot> const newSnapshot(
+                    ::new X86Lab::Snapshot(latestSnapshot, vm.getState()));
+                latestSnapshot = newSnapshot;
+
+                updateUi();
             }
         }
 

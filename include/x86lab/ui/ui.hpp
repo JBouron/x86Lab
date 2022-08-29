@@ -1,6 +1,7 @@
 #pragma once
 #include <x86lab/vm.hpp>
 #include <x86lab/assembler.hpp>
+#include <x86lab/snapshot.hpp>
 #include <string>
 #include <memory>
 
@@ -30,12 +31,10 @@ public:
     // Construct a State.
     // @param runState: The VM's runnable state.
     // @param code: The code that is currently loaded and running on the Vm.
-    // @param registerValues: Pointer on a Vm::State::Registers containing the
-    // latest value for each registers of the VM. This pointer is not owned by
-    // this class.
+    // @param snapshot: The latest snapshot of the VM.
     State(Vm::OperatingState const runState,
           std::shared_ptr<Assembler::Code const> const code, 
-          Vm::State::Registers const& registerValues);
+          std::shared_ptr<Snapshot const> const snapshot);
 
     // Get the VM's run OperatingState.
     Vm::OperatingState state() const;
@@ -44,12 +43,15 @@ public:
     std::shared_ptr<Assembler::Code const> code() const;
 
     // Get the values of the registers.
-    Vm::State::Registers const& registers() const;
+    Snapshot::Registers const& registers() const;
+
+    // Get the values of the registers prior to executing the last instruction.
+    Snapshot::Registers prevRegisters() const;
 
 private:
     Vm::OperatingState runState;
     std::shared_ptr<Assembler::Code const> loadedCode;
-    Vm::State::Registers regValues;
+    std::shared_ptr<Snapshot const> const latestSnapshot;
 };
 
 // Backend implementation of the user interface. This is meant to be derived in

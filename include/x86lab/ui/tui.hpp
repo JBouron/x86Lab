@@ -23,7 +23,8 @@ private:
 
     // Update the register windows with the new register values.
     // @param newRegs: latest register values.
-    void doUpdateRegWin(Vm::State::Registers const& newRegs);
+    void doUpdateRegWin(Snapshot::Registers const& prevRegs,
+                        Snapshot::Registers const& newRegs);
  
     // Update the code window.
     // @param fileName: The source code file path.
@@ -148,11 +149,6 @@ private:
     // The size of the gap between the border of the terminal and the windows,
     // as well as between the windows themselves.
     static constexpr u32 gapSize = 1;
-
-    // The previous values of the registers.
-    // FIXME: This should not be here, doUpdate should pass the old and new
-    // states instead.
-    Vm::State::Registers prevRegs;
 };
 
 }

@@ -61,7 +61,7 @@ Action Tui::doWaitForNextAction() {
 }
 
 void Tui::doUpdate(State const& newState) {
-    doUpdateRegWin(newState.registers());
+    doUpdateRegWin(newState.prevRegisters(), newState.registers());
 
     Assembler::InstructionMap const& map(newState.code()->getInstructionMap());
     auto const entry(map.mapInstructionPointer(newState.registers().rip));
@@ -71,9 +71,11 @@ void Tui::doUpdate(State const& newState) {
     refresh();
 }
 
-void Tui::doUpdateRegWin(Vm::State::Registers const& newRegs) {
+void Tui::doUpdateRegWin(Snapshot::Registers const& prevRegs,
+                         Snapshot::Registers const& newRegs) {
     Window& w(*regWin);
     w.clearAndResetCursor();
+
     char buf[512];
     sprintf(buf, "rax = 0x%016lx   rbx = 0x%016lx\n", prevRegs.rax, prevRegs.rbx);
     w << buf;
@@ -146,8 +148,6 @@ void Tui::doUpdateRegWin(Vm::State::Registers const& newRegs) {
     w << buf;
     sprintf(buf, " +-> base = 0x%016lx   limit = 0x%08x\n", newRegs.gdt.base, newRegs.gdt.limit);
     w << buf;
-
-    prevRegs = newRegs;
 }
 
 void Tui::doUpdateCodeWin(std::string const& fileName, u64 const currLine) {

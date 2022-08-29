@@ -11,7 +11,7 @@ Action Cli::doWaitForNextAction() {
 
 void Cli::doUpdate(State const& newState) {
     // Simply dump the state in stdout.
-    Vm::State::Registers const& r(newState.registers());
+    Snapshot::Registers const& r(newState.registers());
 
     // Using printf for hexadecimal output is just way simpler than std::cout.
     printf("-- @ rip = 0x%016lx --------------------------\n", r.rip);
