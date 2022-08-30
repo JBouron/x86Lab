@@ -397,10 +397,6 @@ void Vm::enable64BitsMode() {
     isRealMode = false;
 }
 
-void* Vm::getMemory() {
-    return memory;
-}
-
 Vm::OperatingState Vm::operatingState() const {
     return currState;
 }

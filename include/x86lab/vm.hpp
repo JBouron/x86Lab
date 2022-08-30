@@ -134,10 +134,6 @@ public:
     // mmap error.
     void enable64BitsMode();
 
-    // Get pointer to guest's physical memory.
-    // Very unsafe, but certainly very fun.
-    void *getMemory();
-
     // State of the KVM.
     enum class OperatingState {
         // The KVM is runnable.
