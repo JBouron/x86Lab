@@ -47,6 +47,11 @@ public:
             Table gdt;
 
             // TODO: Include floating point registers.
+
+            // Build a Registers from KVM's data structures.
+            // @param regs: The value of general purpose registers.
+            // @param sregs: The value of special registers.
+            Registers(kvm_regs const& regs, kvm_sregs const& sregs);
         };
 
         // Snapshot of the VM's physical memory.

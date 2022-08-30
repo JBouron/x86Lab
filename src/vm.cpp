@@ -2,6 +2,23 @@
 
 namespace X86Lab {
 
+Vm::State::Registers::Registers(kvm_regs const& regs, kvm_sregs const& sregs) :
+    rax(regs.rax), rbx(regs.rbx), rcx(regs.rcx), rdx(regs.rdx),
+    rdi(regs.rdi), rsi(regs.rsi), rsp(regs.rsp), rbp(regs.rbp),
+    r8(regs.r8),   r9(regs.r9),   r10(regs.r10), r11(regs.r11),
+    r12(regs.r12), r13(regs.r13), r14(regs.r14), r15(regs.r15),
+
+    rflags(regs.rflags), rip(regs.rip),
+
+    cs(sregs.cs.selector), ds(sregs.ds.selector), es(sregs.es.selector),
+    fs(sregs.fs.selector), gs(sregs.gs.selector), ss(sregs.ss.selector),
+
+    cr0(sregs.cr0), cr2(sregs.cr2), cr3(sregs.cr3), cr4(sregs.cr4),
+    cr8(sregs.cr8), efer(sregs.efer),
+
+    idt({.base = sregs.idt.base, .limit = sregs.idt.limit}),
+    gdt({.base = sregs.gdt.base, .limit = sregs.gdt.limit}) {}
+
 Vm::State::Registers const& Vm::State::registers() const {
     return regs;
 }
@@ -85,75 +102,20 @@ std::unique_ptr<Vm::State> Vm::getState() const {
 Vm::State::Registers Vm::getRegisters() const {
     kvm_regs const regs(Util::Kvm::getRegs(vcpuFd));
     kvm_sregs const sregs(Util::Kvm::getSRegs(vcpuFd));
-
-    State::Registers const regFile({
-        .rax = regs.rax,
-        .rbx = regs.rbx,
-        .rcx = regs.rcx,
-        .rdx = regs.rdx,
-        .rdi = regs.rdi,
-        .rsi = regs.rsi,
-        .rsp = regs.rsp,
-        .rbp = regs.rbp,
-        .r8  = regs.r8,
-        .r9  = regs.r9,
-        .r10 = regs.r10,
-        .r11 = regs.r11,
-        .r12 = regs.r12,
-        .r13 = regs.r13,
-        .r14 = regs.r14,
-        .r15 = regs.r15,
-
-        .rflags = regs.rflags,
-        .rip = regs.rip,
-
-        .cs = sregs.cs.selector,
-        .ds = sregs.ds.selector,
-        .es = sregs.es.selector,
-        .fs = sregs.fs.selector,
-        .gs = sregs.gs.selector,
-        .ss = sregs.ss.selector,
-
-        .cr0 = sregs.cr0,
-        .cr2 = sregs.cr2,
-        .cr3 = sregs.cr3,
-        .cr4 = sregs.cr4,
-        .cr8 = sregs.cr8,
-
-        .efer = sregs.efer,
-
-        .idt = {
-            .base = sregs.idt.base,
-            .limit = sregs.idt.limit,
-        },
-        .gdt = {
-            .base = sregs.gdt.base,
-            .limit = sregs.gdt.limit,
-        },
-    });
-    return regFile;
+    return State::Registers(regs, sregs);
 }
 
 void Vm::setRegisters(State::Registers const& registerValues) {
     kvm_regs const regs({
-        .rax    = registerValues.rax,
-        .rbx    = registerValues.rbx,
-        .rcx    = registerValues.rcx,
-        .rdx    = registerValues.rdx,
-        .rsi    = registerValues.rsi,
-        .rdi    = registerValues.rdi,
-        .rsp    = registerValues.rsp,
-        .rbp    = registerValues.rbp,
-        .r8     = registerValues.r8,
-        .r9     = registerValues.r9,
-        .r10    = registerValues.r10,
-        .r11    = registerValues.r11,
-        .r12    = registerValues.r12,
-        .r13    = registerValues.r13,
-        .r14    = registerValues.r14,
-        .r15    = registerValues.r15,
-        .rip    = registerValues.rip,
-        .rflags = registerValues.rflags,
+        .rax    = registerValues.rax, .rbx    = registerValues.rbx,
+        .rcx    = registerValues.rcx, .rdx    = registerValues.rdx,
+        .rsi    = registerValues.rsi, .rdi    = registerValues.rdi,
+        .rsp    = registerValues.rsp, .rbp    = registerValues.rbp,
+        .r8     = registerValues.r8,  .r9     = registerValues.r9,
+        .r10    = registerValues.r10, .r11    = registerValues.r11,
+        .r12    = registerValues.r12, .r13    = registerValues.r13,
+        .r14    = registerValues.r14, .r15    = registerValues.r15,
+        .rip    = registerValues.rip, .rflags = registerValues.rflags,
     });
     Util::Kvm::setRegs(vcpuFd, regs);
 
