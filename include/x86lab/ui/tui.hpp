@@ -109,7 +109,6 @@ private:
         std::string title;
         // Height and width of the window in rows and cols respectively.
         u32 height;
-        u32 width;
     };
 
     // Ncurses only need to be initialized once. In the event that we have two

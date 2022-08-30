@@ -1,5 +1,5 @@
-CC := g++
-CXXFLAGS := -Iinclude/ -O3 -std=c++20
+CXX := clang++
+CXXFLAGS := -Wall -Wextra -Werror -Iinclude/ -O3 -std=c++20
 LDLIBS := -lncurses
 
 CPP_FILES := $(shell find src/ -type f -name "*.cpp")
@@ -14,21 +14,21 @@ all: x86lab
 # 	foo.o: foo.cpp bar.hpp baz.hpp ...
 .deps: $(CPP_FILES)
 	for f in $(CPP_FILES); do \
-		$(CC) -MM $$f; \
+		$(CXX) $(CXXFLAGS) -MM $$f; \
 	done >> $@
 # Include the deps computed above.
 include .deps
 
 # Executable.
 x86lab: main.o $(OBJ_FILES)
-	$(CC) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
 
 # Tests.
 test: x86labTests
 	./x86labTests
 
 x86labTests: tests.o $(OBJ_FILES)
-	$(CC) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
 
 .PHONY: clean
 clean:

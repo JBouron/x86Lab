@@ -59,7 +59,7 @@ public:
         struct Memory {
             // Pointer to the memory snapshot, this is a _copy_ of the full
             // physical memory, changing this as no effect on the running VM.
-            std::unique_ptr<u8> data;
+            std::unique_ptr<u8[]> data;
             // The size of the memory snapshot (and data) in bytes.
             u64 size;
         };

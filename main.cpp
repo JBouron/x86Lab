@@ -69,7 +69,7 @@ int main(int argc, char **argv) {
     }
 
     Mode startMode(Mode::LongMode);
-    for (u32 i(1); i < argc - 1; ++i) {
+    for (int i(1); i < argc - 1; ++i) {
         std::string const arg(argv[i]);
         if (arg == "--16") {
             startMode = Mode::RealMode;

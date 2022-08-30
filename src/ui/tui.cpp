@@ -182,13 +182,12 @@ Tui::Window::Window(u32 const height, u32 const width, std::string const& title)
     borderWin(::newwin(height, width, defaultPosY, defaultPosX)),
     win(::newwin(height-(innerPadY*2),width-(innerPadX*2),innerPadY,innerPadX)),
     title(std::string(" ") + title + " "),
-    height(height),
-    width(width) {
+    height(height) {
     // Enable keypad on the (inner) window in order to capture function keys.
     ::keypad(win, true);
     // Prepare the border window and add the title to it.
     ::wborder(borderWin, '|', '|', '-', '-', '+', '+', '+', '+');
-    ::mvwprintw(borderWin, 0, titleOffset, this->title.c_str());
+    ::mvwprintw(borderWin, 0, titleOffset, "%s", this->title.c_str());
     ::leaveok(win, true);
 }
 
@@ -217,7 +216,7 @@ void Tui::Window::clearAndResetCursor() {
 }
 
 Tui::Window& Tui::Window::operator<<(char const * const str) {
-    ::wprintw(win, str);
+    ::wprintw(win, "%s", str);
     return *this;
 }
 

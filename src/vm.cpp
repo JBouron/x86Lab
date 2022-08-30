@@ -30,9 +30,7 @@ Vm::Vm(u64 const memorySize) :
     // done then the default behaviour is used. However it's not really clear if
     // the default behaviour allows access to MSRs or not. Hence disable it here
     // completely.
-    kvm_msr_filter msrFilter({
-        .flags = 0,
-    });
+    kvm_msr_filter msrFilter{};
     // Setting all ranges to 0 disable filtering. In this case flags must be
     // zero as well.
     for (size_t i(0); i < KVM_MSR_FILTER_MAX_RANGES; ++i) {
@@ -138,12 +136,11 @@ void Vm::loadCode(u8 const * const shellCode, u64 const shellCodeSize) {
 
 std::unique_ptr<Vm::State> Vm::getState() const {
     State::Registers const regs(getRegisters());
-    u8 * const rawPtr(new u8[physicalMemorySize]);
-    std::memcpy(rawPtr, memory, physicalMemorySize);
     Vm::State::Memory mem({
-        .data = std::unique_ptr<u8>(rawPtr),
+        .data = std::unique_ptr<u8[]>(new u8[physicalMemorySize]),
         .size = physicalMemorySize,
     });
+    std::memcpy(mem.data.get(), memory, physicalMemorySize);
     return std::unique_ptr<Vm::State>(new Vm::State(regs, std::move(mem)));
 }
 
@@ -407,45 +404,6 @@ void* Vm::getMemory() {
 Vm::OperatingState Vm::operatingState() const {
     return currState;
 }
-
-constexpr char const* exitReasonToString[] = {
-    [KVM_EXIT_UNKNOWN        ] = "KVM_EXIT_UNKNOWN",
-    [KVM_EXIT_EXCEPTION      ] = "KVM_EXIT_EXCEPTION",
-    [KVM_EXIT_IO             ] = "KVM_EXIT_IO",
-    [KVM_EXIT_HYPERCALL      ] = "KVM_EXIT_HYPERCALL",
-    [KVM_EXIT_DEBUG          ] = "KVM_EXIT_DEBUG",
-    [KVM_EXIT_HLT            ] = "KVM_EXIT_HLT",
-    [KVM_EXIT_MMIO           ] = "KVM_EXIT_MMIO",
-    [KVM_EXIT_IRQ_WINDOW_OPEN] = "KVM_EXIT_IRQ_WINDOW_OPEN",
-    [KVM_EXIT_SHUTDOWN       ] = "KVM_EXIT_SHUTDOWN",
-    [KVM_EXIT_FAIL_ENTRY     ] = "KVM_EXIT_FAIL_ENTRY",
-    [KVM_EXIT_INTR           ] = "KVM_EXIT_INTR",
-    [KVM_EXIT_SET_TPR        ] = "KVM_EXIT_SET_TPR",
-    [KVM_EXIT_TPR_ACCESS     ] = "KVM_EXIT_TPR_ACCESS",
-    [KVM_EXIT_S390_SIEIC     ] = "KVM_EXIT_S390_SIEIC",
-    [KVM_EXIT_S390_RESET     ] = "KVM_EXIT_S390_RESET",
-    [KVM_EXIT_DCR            ] = "KVM_EXIT_DCR",
-    [KVM_EXIT_NMI            ] = "KVM_EXIT_NMI",
-    [KVM_EXIT_INTERNAL_ERROR ] = "KVM_EXIT_INTERNAL_ERROR",
-    [KVM_EXIT_OSI            ] = "KVM_EXIT_OSI",
-    [KVM_EXIT_PAPR_HCALL	 ] = "KVM_EXIT_PAPR_HCALL",
-    [KVM_EXIT_S390_UCONTROL	 ] = "VM_EXIT_S390_UCONTROL",
-    [KVM_EXIT_WATCHDOG       ] = "KVM_EXIT_WATCHDOG",
-    [KVM_EXIT_S390_TSCH      ] = "KVM_EXIT_S390_TSCH",
-    [KVM_EXIT_EPR            ] = "KVM_EXIT_EPR",
-    [KVM_EXIT_SYSTEM_EVENT   ] = "KVM_EXIT_SYSTEM_EVENT",
-    [KVM_EXIT_S390_STSI      ] = "KVM_EXIT_S390_STSI",
-    [KVM_EXIT_IOAPIC_EOI     ] = "KVM_EXIT_IOAPIC_EOI",
-    [KVM_EXIT_HYPERV         ] = "KVM_EXIT_HYPERV",
-    [KVM_EXIT_ARM_NISV       ] = "KVM_EXIT_ARM_NISV",
-    [KVM_EXIT_X86_RDMSR      ] = "KVM_EXIT_X86_RDMSR",
-    [KVM_EXIT_X86_WRMSR      ] = "KVM_EXIT_X86_WRMSR",
-    [KVM_EXIT_DIRTY_RING_FULL] = "KVM_EXIT_DIRTY_RING_FULL",
-    [KVM_EXIT_AP_RESET_HOLD  ] = "KVM_EXIT_AP_RESET_HOLD",
-    [KVM_EXIT_X86_BUS_LOCK   ] = "KVM_EXIT_X86_BUS_LOCK",
-    [KVM_EXIT_XEN            ] = "KVM_EXIT_XEN",
-    [KVM_EXIT_RISCV_SBI      ] = "KVM_EXIT_RISCV_SBI",
-};
 
 Vm::OperatingState Vm::step() {
     // Enable debug on guest vcpu in order to be able to do single

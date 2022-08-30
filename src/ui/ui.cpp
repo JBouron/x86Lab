@@ -48,10 +48,9 @@ void Backend::log(std::string const& msg) {
         std::chrono::system_clock::now());
     std::time_t const tm(std::chrono::system_clock::to_time_t(date));
     std::ostringstream oss;
-    oss << std::put_time(std::localtime(&tm), "%T");
+    oss << "[" << std::put_time(std::localtime(&tm), "%T") << "]";
 
     // Prefix for log message [<date>].
-    std::string const prefix("[" + oss.str() + "]");
-    doLog(prefix + " " + msg);
+    doLog(oss.str() + " " + msg);
 }
 }
