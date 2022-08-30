@@ -1,12 +1,6 @@
 #pragma once
 #include <iostream>
-#include <linux/kvm.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
-#include <fcntl.h>
-#include <unistd.h>
 #include <memory>
-
 #include <x86lab/util.hpp>
 
 namespace X86Lab {
@@ -159,58 +153,6 @@ public:
     OperatingState step();
 
 private:
-    // The following methods are used as part of the constructor. They allow to
-    // have const members for this class.
-
-    // Get a file descriptor on /dev/kvm.
-    // @return: The file descriptor.
-    // @throws: An Error in case of error.
-    static int getKvmHandle();
-
-    // Create a KVM VM.
-    // @param kvmHandle: File descriptor on /dev/kvm for ioctl calls.
-    // @return: The file descriptor associated to the created VM.
-    // @throws: An Error in case of error.
-    static int createKvmVm(int const kvmHandle);
-
-    // Create a Vcpu to a KVM Vm.
-    // @param vmFd: File descriptor on the KVM Vm for which to add the vcpu to.
-    // @return: The file descriptor associated to the vcpu.
-    // @throws: An Error in case of error.
-    static int createKvmVcpu(int const vmFd);
-
-    // Mmap the run structure of the vcpu. Assumes that vCpu has been
-    // initialized.
-    // @param kvmHandle: File descriptor on /dev/kvm for ioctl calls.
-    // @param vcpuFd: File descriptor for the vCpu.
-    // @return: A reference to the kvm_run structure associated with vcpuFd.
-    // @throws: An Error in case of error.
-    static kvm_run& getKvmRunStruct(int const kvmHandle, int const vcpuFd);
-
-    // Some low-level function wrapper for KVM ioctl calls.
-
-    // Perform a KVM_GET_REGS ioctl on this Vm.
-    // @return: A kvm_regs holding the current values of the registers on the
-    // VM. Note: This returns by value!
-    // @throws: A KvmError in case of error.
-    kvm_regs kvmGetRegs() const;
-
-    // Perform a KVM_SET_REGS ioctl on this Vm.
-    // @param regs: The kvm_regs to write.
-    // @throws: A KvmError in case of error.
-    void kvmSetRegs(kvm_regs const& regs);
-
-    // Perform a KVM_GET_SREGS ioctl on this Vm.
-    // @return: A kvm_sregs holding the current values of the special registers
-    // on the VM. Note: This returns by value!
-    // @throws: A KvmError in case of error.
-    kvm_sregs kvmGetSRegs() const;
-
-    // Perform a KVM_SET_SREGS ioctl on this Vm.
-    // @param regs: The kvm_sregs to write.
-    // @throws: A KvmError in case of error.
-    void kvmSetSRegs(kvm_sregs const& regs);
-
     // Add more physical memory to the guest.
     // @param offset: The offset at which the memory should be added.
     // @param size: The amount of memory to add to the guest in bytes. Must be a
@@ -219,8 +161,6 @@ private:
     // @throws: KvmError or MmapError in case of kvm ioctl error or mmap error.
     void *addPhysicalMemory(u64 const offset, size_t const size);
 
-    // File descriptor on /dev/kvm.
-    int const kvmHandle;
     // File descriptor for the KVM.
     int const vmFd;
     // File descriptor for the vCpu.

@@ -1,5 +1,4 @@
 #include <x86lab/vm.hpp>
-#include <memory>
 
 namespace X86Lab {
 
@@ -16,10 +15,9 @@ Vm::State::State(Registers const& regs, Memory && mem) :
     mem(std::move(mem)) {}
 
 Vm::Vm(u64 const memorySize) :
-    kvmHandle(getKvmHandle()),
-    vmFd(createKvmVm(kvmHandle)),
-    vcpuFd(createKvmVcpu(vmFd)),
-    kvmRun(getKvmRunStruct(kvmHandle, vcpuFd)),
+    vmFd(Util::Kvm::createVm()),
+    vcpuFd(Util::Kvm::createVcpu(vmFd)),
+    kvmRun(Util::Kvm::getVcpuRunStruct(vcpuFd)),
     usedMemorySlots(0),
     physicalMemorySize(memorySize * PAGE_SIZE),
     memory(addPhysicalMemory(0x0, physicalMemorySize)),
@@ -30,75 +28,11 @@ Vm::Vm(u64 const memorySize) :
     // done then the default behaviour is used. However it's not really clear if
     // the default behaviour allows access to MSRs or not. Hence disable it here
     // completely.
-    kvm_msr_filter msrFilter{};
-    // Setting all ranges to 0 disable filtering. In this case flags must be
-    // zero as well.
-    for (size_t i(0); i < KVM_MSR_FILTER_MAX_RANGES; ++i) {
-        msrFilter.ranges[i].nmsrs = 0;
-    }
-    if (::ioctl(vmFd, KVM_X86_SET_MSR_FILTER, &msrFilter) == -1) {
-        throw KvmError("Failed to allow MSR access", errno);
-    }
+    Util::Kvm::disableMsrFiltering(vmFd);
 
     // Setup access to CPUID information. We don't want to "hide" anything from
     // the guest, having CPUID instruction available can always be useful.
-    // FIXME: We should somehow guess what this number should be. Maybe by
-    // repeatedly calling the ioctl and increasing it every time it fails?
-    size_t const nent(64);
-    size_t const structSize(sizeof(kvm_cpuid2) + nent * sizeof(kvm_cpuid_entry2));
-    kvm_cpuid2 * const kvmCpuid(reinterpret_cast<kvm_cpuid2*>(malloc(structSize)));
-    std::memset(kvmCpuid, 0x0, structSize);
-    assert(!!kvmCpuid);
-    kvmCpuid->nent = nent;
-    if (::ioctl(kvmHandle, KVM_GET_SUPPORTED_CPUID, kvmCpuid) == -1) {
-        throw KvmError("Failed to get supported CPUID", errno);
-    }
-
-    // Now set the CPUID capabilities.
-    if (::ioctl(vcpuFd, KVM_SET_CPUID2, kvmCpuid) == -1) {
-        throw KvmError("Failed to set supported CPUID", errno);
-    }
-}
-
-int Vm::getKvmHandle(){
-    int const kvmHandle(::open("/dev/kvm", O_RDWR | O_CLOEXEC));
-    if (kvmHandle == -1) {
-        throw KvmError("Cannot open /dev/kvm", errno);
-    } else {
-        return kvmHandle;
-    }
-}
-int Vm::createKvmVm(int const kvmHandle) {
-    int const vmFd(::ioctl(kvmHandle, KVM_CREATE_VM, 0));
-    if (vmFd == -1) {
-        throw KvmError("Cannot create VM", errno);
-    } else {
-        return vmFd;
-    }
-}
-
-int Vm::createKvmVcpu(int const vmFd) {
-    int const vcpuFd(::ioctl(vmFd, KVM_CREATE_VCPU, 0));
-    if (vcpuFd == -1) {
-        throw KvmError("Cannot create VCPU", errno);
-    } else {
-        return vcpuFd;
-    }
-}
-
-kvm_run& Vm::getKvmRunStruct(int const kvmHandle, int const vcpuFd) {
-    int const vcpuRunSize(::ioctl(kvmHandle, KVM_GET_VCPU_MMAP_SIZE, NULL));
-    if (vcpuRunSize == -1) {
-        throw KvmError("Cannot get kvm_run structure size", errno);
-    }
-    int const prot(PROT_READ | PROT_WRITE);
-    int const flags(MAP_PRIVATE);
-    void * const mapRes(::mmap(NULL, vcpuRunSize, prot, flags, vcpuFd, 0));
-    if (mapRes == MAP_FAILED) {
-        throw MmapError("Failed to mmap kvm_run structure", errno);
-    } else {
-        return *reinterpret_cast<kvm_run*>(mapRes);
-    }
+    Util::Kvm::setupCpuid(vcpuFd);
 }
 
 void Vm::loadCode(u8 const * const shellCode, u64 const shellCodeSize) {
@@ -121,14 +55,14 @@ void Vm::loadCode(u8 const * const shellCode, u64 const shellCodeSize) {
     // Option 1 would mean having to map another page in the guest physical
     // memory (namely at 0xFFFFF000) and that the first call to step() does not
     // actually run the first instruction. Option 2 is easier to implement.
-    kvm_sregs sregs(kvmGetSRegs());
+    kvm_sregs sregs(Util::Kvm::getSRegs(vcpuFd));
     sregs.cs.base = 0x0;
     // Per Intel's documentation, if the guest is running in real-mode then the
     // limit MUST be 0xFFFF. See "26.3.1.2 Checks on Guest Segment Registers" in
     // Vol. 3C.
     sregs.cs.limit = 0xFFFF;
     sregs.cs.selector = 0;
-    kvmSetSRegs(sregs);
+    Util::Kvm::setSRegs(vcpuFd, sregs);
 
     // The KVM is now runnable.
     currState = OperatingState::Runnable;
@@ -145,8 +79,8 @@ std::unique_ptr<Vm::State> Vm::getState() const {
 }
 
 Vm::State::Registers Vm::getRegisters() const {
-    kvm_regs const regs(kvmGetRegs());
-    kvm_sregs const sregs(kvmGetSRegs());
+    kvm_regs const regs(Util::Kvm::getRegs(vcpuFd));
+    kvm_sregs const sregs(Util::Kvm::getSRegs(vcpuFd));
 
     State::Registers const regFile({
         .rax = regs.rax,
@@ -217,12 +151,12 @@ void Vm::setRegisters(State::Registers const& registerValues) {
         .rip    = registerValues.rip,
         .rflags = registerValues.rflags,
     });
-    kvmSetRegs(regs);
+    Util::Kvm::setRegs(vcpuFd, regs);
 
     // State::Registers doesn't quite contain all the values that kvm_sregs has.
     // Hence for those missing values, we read the current kvm_sregs to re-use
     // them in the call to KVM_SET_SREGS.
-    kvm_sregs sregs(kvmGetSRegs());
+    kvm_sregs sregs(Util::Kvm::getSRegs(vcpuFd));
 
     sregs.cs.selector = registerValues.cs;
     sregs.ds.selector = registerValues.ds;
@@ -259,12 +193,12 @@ void Vm::setRegisters(State::Registers const& registerValues) {
     sregs.gdt.base = registerValues.gdt.base;
     sregs.gdt.limit = registerValues.gdt.limit;
 
-    kvmSetSRegs(sregs);
+    Util::Kvm::setSRegs(vcpuFd, sregs);
 }
 
 void Vm::enableProtectedMode() {
     isRealMode = false;
-    kvm_sregs sregs(kvmGetSRegs());
+    kvm_sregs sregs(Util::Kvm::getSRegs(vcpuFd));
 
     // Enable protected mode.
     sregs.cr0 |= 1;
@@ -310,7 +244,7 @@ void Vm::enableProtectedMode() {
     sregs.gs = sregs.ds;
     sregs.ss = sregs.ds;
 
-    kvmSetSRegs(sregs);
+    Util::Kvm::setSRegs(vcpuFd, sregs);
 }
 
 void Vm::enable64BitsMode() {
@@ -339,7 +273,7 @@ void Vm::enable64BitsMode() {
 
     // Page table is ready now setup the registers as they would be in long
     // mode.
-    kvm_sregs sregs(kvmGetSRegs());
+    kvm_sregs sregs(Util::Kvm::getSRegs(vcpuFd));
 
     // Enable PAE, mandatory for 64-bits.
     sregs.cr4 = 0x20;
@@ -393,7 +327,7 @@ void Vm::enable64BitsMode() {
     sregs.gs = sregs.ds;
     sregs.ss = sregs.ds;
 
-    kvmSetSRegs(sregs);
+    Util::Kvm::setSRegs(vcpuFd, sregs);
     isRealMode = false;
 }
 
@@ -433,34 +367,6 @@ Vm::OperatingState Vm::step() {
         currState = OperatingState::SingleStepError;
     }
     return currState;
-}
-
-kvm_regs Vm::kvmGetRegs() const {
-    kvm_regs regs;
-    if (::ioctl(vcpuFd, KVM_GET_REGS, &regs) == -1) {
-        throw KvmError("Cannot get guest registers", errno);
-    }
-    return regs;
-}
-
-void Vm::kvmSetRegs(kvm_regs const& regs) {
-    if (::ioctl(vcpuFd, KVM_SET_REGS, std::addressof(regs)) == -1) {
-        throw KvmError("Cannot set guest registers", errno);
-    }
-}
-
-kvm_sregs Vm::kvmGetSRegs() const {
-    kvm_sregs sregs;
-    if (::ioctl(vcpuFd, KVM_GET_SREGS, &sregs) == -1) {
-        throw KvmError("Cannot get guest special registers", errno);
-    }
-    return sregs;
-}
-
-void Vm::kvmSetSRegs(kvm_sregs const& regs) {
-    if (::ioctl(vcpuFd, KVM_SET_SREGS, std::addressof(regs)) == -1) {
-        throw KvmError("Cannot set guest special registers", errno);
-    }
 }
 
 void* Vm::addPhysicalMemory(u64 const offset, size_t const size) {
