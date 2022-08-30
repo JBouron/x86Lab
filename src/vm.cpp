@@ -14,7 +14,7 @@ Vm::State::State(Registers const& regs, Memory && mem) :
     regs(regs),
     mem(std::move(mem)) {}
 
-Vm::Vm(u64 const memorySize) :
+Vm::Vm(CpuMode const startMode, u64 const memorySize) :
     vmFd(Util::Kvm::createVm()),
     vcpuFd(Util::Kvm::createVcpu(vmFd)),
     kvmRun(Util::Kvm::getVcpuRunStruct(vcpuFd)),
@@ -22,7 +22,7 @@ Vm::Vm(u64 const memorySize) :
     physicalMemorySize(memorySize * PAGE_SIZE),
     memory(addPhysicalMemory(0x0, physicalMemorySize)),
     currState(OperatingState::NoCodeLoaded),
-    isRealMode(true)
+    isRealMode(startMode == CpuMode::RealMode)
     {
     // Disable any MSR access filtering. KVM's doc indicate that if this is not
     // done then the default behaviour is used. However it's not really clear if
@@ -33,6 +33,10 @@ Vm::Vm(u64 const memorySize) :
     // Setup access to CPUID information. We don't want to "hide" anything from
     // the guest, having CPUID instruction available can always be useful.
     Util::Kvm::setupCpuid(vcpuFd);
+
+    // Setup the registers depending on the requested mode and honor the initial
+    // value of registers documented in .hpp.
+    setRegistersInitialValue(startMode);
 }
 
 void Vm::loadCode(u8 const * const shellCode, u64 const shellCodeSize) {
@@ -196,8 +200,69 @@ void Vm::setRegisters(State::Registers const& registerValues) {
     Util::Kvm::setSRegs(vcpuFd, sregs);
 }
 
+Vm::OperatingState Vm::operatingState() const {
+    return currState;
+}
+
+Vm::OperatingState Vm::step() {
+    // Enable debug on guest vcpu in order to be able to do single
+    // stepping.
+    // The documentation is sparse on this, but it seems that single
+    // stepping gets disabled everytime registers are set using
+    // KVM_SET_REGS. Hence do it right before the call to KVM_RUN.
+    kvm_guest_debug dbg;
+    dbg.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_SINGLESTEP;
+    if (::ioctl(vcpuFd, KVM_SET_GUEST_DEBUG, &dbg) == -1) {
+        currState = OperatingState::SingleStepError;
+        throw KvmError("Cannot set guest debug", errno);
+    }
+
+    if (::ioctl(vcpuFd, KVM_RUN, NULL) != 0) {
+        currState = OperatingState::SingleStepError;
+        throw KvmError("Cannot run VM", errno);
+    }
+
+    if (kvmRun.exit_reason == KVM_EXIT_DEBUG) {
+        // The execution stopped after one step, we are still runnable.
+        currState = OperatingState::Runnable;
+    } else if (kvmRun.exit_reason == KVM_EXIT_SHUTDOWN) {
+        // Execution stopped the host. This is most likely a triple-fault hehe.
+        currState = OperatingState::Shutdown;
+    } else if (kvmRun.exit_reason == KVM_EXIT_HLT) {
+        // The single step executed a halt instruction.
+        currState = OperatingState::Halted;
+    } else {
+        // For now consider everything else as an error.
+        currState = OperatingState::SingleStepError;
+    }
+    return currState;
+}
+
+void Vm::setRegistersInitialValue(CpuMode const mode) {
+    // Now setup the requested mode. If startMode == CpuMode::RealMode then we
+    // have nothing to do as this is the default mode in KVM.
+    if (mode == CpuMode::ProtectedMode) {
+        enableProtectedMode();
+    } else if (mode == CpuMode::LongMode) {
+        enable64BitsMode();
+    }
+
+    // Honor the documented initial values of the registers. Don't touch the
+    // segment registers as those have been set when enabling the requested cpu
+    // mode above.
+    State::Registers regs(getRegisters());
+    regs.rax = 0;  regs.rbx = 0;  regs.rcx = 0;  regs.rdx = 0;
+    regs.rdi = 0;  regs.rsi = 0;  regs.rsp = 0;  regs.rbp = 0;
+    regs.r8  = 0;  regs.r9  = 0;  regs.r10 = 0;  regs.r11 = 0;
+    regs.r12 = 0;  regs.r13 = 0;  regs.r14 = 0;  regs.r15 = 0;
+    regs.rflags = 0x2;
+    // rip will be set when loading code.
+    regs.gdt.base = 0; regs.gdt.limit = 0;
+    regs.idt.base = 0; regs.idt.limit = 0;
+    setRegisters(regs);
+}
+
 void Vm::enableProtectedMode() {
-    isRealMode = false;
     kvm_sregs sregs(Util::Kvm::getSRegs(vcpuFd));
 
     // Enable protected mode.
@@ -208,8 +273,8 @@ void Vm::enableProtectedMode() {
     // parts anyway. We set it here so that it is non-zero when showing register
     // values.
 
-    // Code segment. Pretend that GDT[1] is a flat code segment.
-    sregs.cs.selector = 0x8;
+    // Flat code segment.
+    sregs.cs.selector = 0x0;
     sregs.cs.base = 0;
     sregs.cs.limit = 0xFFFFF;
     sregs.cs.type = 10;
@@ -224,8 +289,7 @@ void Vm::enableProtectedMode() {
     // loaded in the segment register when entering the VM.
     sregs.cs.unusable = 0;
 
-    // Data and stack segments. Pretend that GDT[2] is a flat data segment with
-    // R/W access flags.
+    // Flat R/W data and stack segments.
     sregs.ds.selector = 0x10;
     sregs.ds.base = 0;
     sregs.ds.limit = 0xFFFFF;
@@ -292,7 +356,7 @@ void Vm::enable64BitsMode() {
     sregs.cr0 = 0xe0000011;
 
     // Setup segment registers' hidden parts.
-    sregs.cs.selector = 20;
+    sregs.cs.selector = 0;
     sregs.cs.base = 0;
     sregs.cs.limit = 0xFFFFFFFF;
     sregs.cs.type = 0xa;
@@ -307,9 +371,8 @@ void Vm::enable64BitsMode() {
     // loaded in the segment register when entering the VM.
     sregs.cs.unusable = 0;
 
-    // Data and stack segments. Pretend that GDT[2] is a flat data segment with
-    // R/W access flags.
-    sregs.ds.selector = 0x18;
+    // Flat R/W data and stack segments.
+    sregs.ds.selector = 0;
     sregs.ds.base = 0;
     sregs.ds.limit = 0xFFFFFFFF;
     sregs.ds.type = 2;
@@ -328,45 +391,6 @@ void Vm::enable64BitsMode() {
     sregs.ss = sregs.ds;
 
     Util::Kvm::setSRegs(vcpuFd, sregs);
-    isRealMode = false;
-}
-
-Vm::OperatingState Vm::operatingState() const {
-    return currState;
-}
-
-Vm::OperatingState Vm::step() {
-    // Enable debug on guest vcpu in order to be able to do single
-    // stepping.
-    // The documentation is sparse on this, but it seems that single
-    // stepping gets disabled everytime registers are set using
-    // KVM_SET_REGS. Hence do it right before the call to KVM_RUN.
-    kvm_guest_debug dbg;
-    dbg.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_SINGLESTEP;
-    if (::ioctl(vcpuFd, KVM_SET_GUEST_DEBUG, &dbg) == -1) {
-        currState = OperatingState::SingleStepError;
-        throw KvmError("Cannot set guest debug", errno);
-    }
-
-    if (::ioctl(vcpuFd, KVM_RUN, NULL) != 0) {
-        currState = OperatingState::SingleStepError;
-        throw KvmError("Cannot run VM", errno);
-    }
-
-    if (kvmRun.exit_reason == KVM_EXIT_DEBUG) {
-        // The execution stopped after one step, we are still runnable.
-        currState = OperatingState::Runnable;
-    } else if (kvmRun.exit_reason == KVM_EXIT_SHUTDOWN) {
-        // Execution stopped the host. This is most likely a triple-fault hehe.
-        currState = OperatingState::Shutdown;
-    } else if (kvmRun.exit_reason == KVM_EXIT_HLT) {
-        // The single step executed a halt instruction.
-        currState = OperatingState::Halted;
-    } else {
-        // For now consider everything else as an error.
-        currState = OperatingState::SingleStepError;
-    }
-    return currState;
 }
 
 void* Vm::addPhysicalMemory(u64 const offset, size_t const size) {

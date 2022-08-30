@@ -22,14 +22,7 @@ static void help() {
         "file is valid and accepted" << std::endl;
 }
 
-// Start mode for the VM.
-enum class Mode {
-    RealMode,
-    ProtectedMode,
-    LongMode,
-};
-
-static void run(Mode const mode, std::string const& fileName) {
+static void run(Vm::CpuMode const vmStartMode, std::string const& fileName) {
     // Run code in `fileName` starting directly in 64 bits mode.
     std::shared_ptr<Ui::Backend> ui(new Ui::Tui());
 
@@ -39,23 +32,20 @@ static void run(Mode const mode, std::string const& fileName) {
     ui->log("Assembled code is " + std::to_string(code->size()) + " bytes");
 
     // Create the VM and load the code in memory.
-    std::shared_ptr<Vm> vm(new Vm(1));
+
+    std::shared_ptr<Vm> vm(new Vm(vmStartMode, 1));
     ui->log("Vm created");
+    if (vmStartMode == Vm::CpuMode::ProtectedMode) {
+        ui->log("VM is using 32-bit protected-mode");
+    } else if (vmStartMode == Vm::CpuMode::LongMode) {
+        ui->log("VM is using 64-bit long-mode");
+    } else {
+        ui->log("Vm is using 16-bit real-mode");
+    }
 
     vm->loadCode(code->machineCode(), code->size());
     ui->log("Code loaded");
 
-    // Enable the requested mode. Note that VMs start in real mode by default
-    // hence nothing to do if mode == Mode::RealMode.
-    if (mode == Mode::ProtectedMode) {
-        ui->log("Enable protected mode on VM");
-        vm->enableProtectedMode();
-    } else if (mode == Mode::LongMode) {
-        ui->log("Enable long mode on VM");
-        vm->enable64BitsMode();
-    } else {
-        ui->log("Vm is using default 16 bit real mode");
-    }
 
     Runner runner(vm, code, ui);
     runner.run();
@@ -68,15 +58,16 @@ int main(int argc, char **argv) {
         std::exit(1);
     }
 
-    Mode startMode(Mode::LongMode);
+    // By default use long-mode on the VM.
+    Vm::CpuMode startMode(Vm::CpuMode::LongMode);
     for (int i(1); i < argc - 1; ++i) {
         std::string const arg(argv[i]);
         if (arg == "--16") {
-            startMode = Mode::RealMode;
+            startMode = Vm::CpuMode::RealMode;
         } else if (arg == "--32") {
-            startMode = Mode::ProtectedMode;
+            startMode = Vm::CpuMode::ProtectedMode;
         } else if (arg == "--64") {
-            startMode = Mode::LongMode;
+            startMode = Vm::CpuMode::LongMode;
         } else if (arg == "--help") {
             help();
             std::exit(0);
