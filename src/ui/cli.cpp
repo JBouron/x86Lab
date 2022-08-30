@@ -35,17 +35,14 @@ void Cli::doUpdate(State const& newState) {
     printf("efer = 0x%016lx\n", r.efer);
 
     // Print information on the instruction being executed.
-    Assembler::InstructionMap const& map(newState.code()->getInstructionMap());
-    auto const entry(map.mapInstructionPointer(r.rip));
-    if (!!entry) {
-        std::cout << "Line        = " << entry.line << std::endl;
-        std::cout << "Next instr. = " << entry.instruction << std::endl;
+    u64 const currLine(newState.currentLine());
+    if (!!currLine) {
+        std::cout << "Line        = " << currLine << std::endl;
     } else {
         std::cout << "Line        = ?" << std::endl;
-        std::cout << "Next instr. = ?" << std::endl;
     }
 
-    isVmRunnable = newState.state() == Vm::OperatingState::Runnable;
+    isVmRunnable = newState.isVmRunnable();
 }
 
 void Cli::doLog(std::string const& msg) {

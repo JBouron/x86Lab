@@ -38,11 +38,23 @@ public:
           std::shared_ptr<Assembler::Code const> const code, 
           std::shared_ptr<Snapshot const> const snapshot);
 
-    // Get the VM's run OperatingState.
-    Vm::OperatingState state() const;
+    // @return: true if the VM is runnable, false otherwise.
+    bool isVmRunnable() const;
 
-    // Get the code loaded in the Vm.
-    std::shared_ptr<Assembler::Code const> code() const;
+    // Get the name of the source file.
+    // @return: The path to the source file.
+    std::string const& sourceFileName() const;
+
+    // Get the line number associated to the current rip. This is equivalent to
+    // mapToLine(registers().rip).
+    // @return: The line number corresponding to the instruction pointed by rip.
+    // If rip cannot be mapped then this function returns 0.
+    u64 currentLine() const;
+
+    // Map an address to a line number in the source file.
+    // @return: If the address can be mapped to a line number then this line is
+    // returned, otherwise 0 is returned.
+    u64 mapToLine(u64 const address) const;
 
     // Get the values of the registers.
     Snapshot::Registers const& registers() const;

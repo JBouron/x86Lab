@@ -12,12 +12,22 @@ State::State(Vm::OperatingState const runState,
     loadedCode(code),
     latestSnapshot(snapshot) {}
 
-Vm::OperatingState State::state() const {
-    return runState;
+bool State::isVmRunnable() const {
+    return runState == Vm::OperatingState::Runnable;
 }
 
-std::shared_ptr<Assembler::Code const> State::code() const {
-    return loadedCode;
+std::string const& State::sourceFileName() const {
+    return loadedCode->fileName();
+}
+
+u64 State::currentLine() const {
+    return mapToLine(registers().rip);
+}
+
+u64 State::mapToLine(u64 const address) const {
+    Assembler::InstructionMap const& map(loadedCode->getInstructionMap());
+    // Re-use the mapInstructionPointer to map an arbitrary address.
+    return map.mapInstructionPointer(address).line;
 }
 
 Snapshot::Registers const& State::registers() const {
