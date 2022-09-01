@@ -1,3 +1,4 @@
 .deps
-x86lab
+./x86lab
+./x86labTests
 *.o

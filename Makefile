@@ -6,6 +6,10 @@ CPP_FILES := $(shell find src/ -type f -name "*.cpp")
 OBJ_FILES := $(CPP_FILES:%.cpp=%.o)
 HPP_FILES := $(shell find include/ -type f -name "*.hpp")
 
+TEST_CPP_FILES := $(shell find tests/ -type f -name "*.cpp")
+TEST_OBJ_FILES := $(TEST_CPP_FILES:%.cpp=%.o)
+TEST_HPP_FILES := $(shell find tests/ -type f -name "*.hpp")
+
 all: x86lab
 
 # Compute each .cpp file's dependency list (headers) and generate a rule for
@@ -27,9 +31,9 @@ x86lab: main.o $(OBJ_FILES)
 test: x86labTests
 	./x86labTests
 
-x86labTests: tests.o $(OBJ_FILES)
+x86labTests: $(TEST_OBJ_FILES) $(OBJ_FILES)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
 
 .PHONY: clean
 clean:
-	rm -f x86lab .deps $(OBJ_FILES) main.o x86labTests tests.o
+	rm -f x86lab .deps $(OBJ_FILES) $(TEST_OBJ_FILES) main.o x86labTests

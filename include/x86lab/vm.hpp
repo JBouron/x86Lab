@@ -42,6 +42,8 @@ public:
             struct Table {
                 u64 base;
                 u16 limit;
+
+                bool operator==(Table const&) const = default;
             };
             Table idt;
             Table gdt;
@@ -52,6 +54,8 @@ public:
             // @param regs: The value of general purpose registers.
             // @param sregs: The value of special registers.
             Registers(kvm_regs const& regs, kvm_sregs const& sregs);
+
+            bool operator==(Registers const&) const = default;
         };
 
         // Snapshot of the VM's physical memory.
