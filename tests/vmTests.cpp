@@ -22,6 +22,22 @@ static std::string writeCode(std::string const& code) {
 }
 
 namespace X86Lab::Test::Vm {
+// Helper function to create a VM and load the given code to memory.
+// @param startMode: The cpu mode the VM should start in.
+// @param assembly: The assembly code to assemble and load into the Vm.
+// @return: A unique_ptr for the instantiated VM.
+static std::unique_ptr<X86Lab::Vm> createVmAndLoadCode(
+    X86Lab::Vm::CpuMode const startMode,
+    std::string const& assembly) {
+
+    std::string const fileName(writeCode(assembly));
+    std::shared_ptr<Assembler::Code> const code(Assembler::assemble(fileName));
+    u64 const memorySize(1);
+    std::unique_ptr<X86Lab::Vm> vm(new X86Lab::Vm(startMode, memorySize));
+    vm->loadCode(code->machineCode(), code->size());
+    return vm;
+}
+
 // The simplest test there is: Execute a few NOPs and make sure as well as
 // RFALGS are as expected.
 static void testReadRipAndRflags() {
@@ -36,46 +52,43 @@ static void testReadRipAndRflags() {
         xor     rax, rax
     )");
 
-    std::string const fileName(writeCode(assembly));
-    std::shared_ptr<Assembler::Code> const code(Assembler::assemble(fileName));
-
-    X86Lab::Vm vm(X86Lab::Vm::CpuMode::LongMode, 1);
-    vm.loadCode(code->machineCode(), code->size());
+    std::unique_ptr<X86Lab::Vm> const vm(
+        createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly));
 
     // Make sure that the VM starts executing the code with interrupts disabled.
-    X86Lab::Vm::State::Registers regs(vm.getRegisters());
+    X86Lab::Vm::State::Registers regs(vm->getRegisters());
     assert(!(regs.rflags & (1 << 9)));
     u64 const codeStart(regs.rip);
 
     // Run sti.
-    assert(vm.step() == X86Lab::Vm::OperatingState::Runnable);
-    regs = vm.getRegisters();
+    assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+    regs = vm->getRegisters();
     // Interrupts are expected to be enabled at that point.
     assert(regs.rflags & (1 << 9));
     assert(regs.rip == codeStart + 1);
 
     // Run nop.
-    assert(vm.step() == X86Lab::Vm::OperatingState::Runnable);
-    regs = vm.getRegisters();
+    assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+    regs = vm->getRegisters();
     // Interrupts are still enabled.
     assert(regs.rflags & (1 << 9));
     assert(regs.rip == codeStart + 2);
 
     // Run cli.
-    assert(vm.step() == X86Lab::Vm::OperatingState::Runnable);
-    regs = vm.getRegisters();
+    assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+    regs = vm->getRegisters();
     // Interrupts should be disabled.
     assert(!(regs.rflags & (1 << 9)));
     assert(regs.rip == codeStart + 3);
 
     // Run xor rax, rax.
-    assert(vm.step() == X86Lab::Vm::OperatingState::Runnable);
-    regs = vm.getRegisters();
+    assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+    regs = vm->getRegisters();
     // Interrupts should still be disabled.
     assert(!(regs.rflags & (1 << 9)));
     assert(regs.rip == codeStart + 6);
     
-    assert(vm.step() == X86Lab::Vm::OperatingState::Runnable);
+    assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
 }
 
 // Test running a Vm in real mode, setting the GP registers to specific values
@@ -114,18 +127,15 @@ static void testRealMode() {
         hlt
     )");
 
-    std::string const fileName(writeCode(assembly));
-    std::shared_ptr<Assembler::Code> const code(Assembler::assemble(fileName));
-
-    X86Lab::Vm vm(X86Lab::Vm::CpuMode::RealMode, 1);
-    vm.loadCode(code->machineCode(), code->size());
+    std::unique_ptr<X86Lab::Vm> const vm(
+        createVmAndLoadCode(X86Lab::Vm::CpuMode::RealMode, assembly));
 
     // Check the values of the general purpose registers (r8-r15 are ignored
     // since we are running in 16 bits, those are expected to be zero).
     // @param rax, ..., rsp: The expected values of the GP registers.
     auto const checkRegs([&](u64 rax, u64 rbx, u64 rcx, u64 rdx,
                              u64 rdi, u64 rsi, u64 rbp, u64 rsp) {
-        X86Lab::Vm::State::Registers const regs(vm.getRegisters());
+        X86Lab::Vm::State::Registers const regs(vm->getRegisters());
         assert(regs.rax == rax); assert(regs.rbx == rbx);
         assert(regs.rcx == rcx); assert(regs.rdx == rdx);
         assert(regs.rdi == rdi); assert(regs.rsi == rsi);
@@ -140,7 +150,7 @@ static void testRealMode() {
     // runnable.
     auto const runNSteps([&](u32 const n) {
         for (u32 i(0); i < n; ++i) {
-            assert(vm.step() == X86Lab::Vm::OperatingState::Runnable);
+            assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
         }
     });
 
@@ -204,19 +214,15 @@ static void testProtectedMode() {
 
         hlt
     )");
-
-    std::string const fileName(writeCode(assembly));
-    std::shared_ptr<Assembler::Code> const code(Assembler::assemble(fileName));
-
-    X86Lab::Vm vm(X86Lab::Vm::CpuMode::ProtectedMode, 1);
-    vm.loadCode(code->machineCode(), code->size());
+    std::unique_ptr<X86Lab::Vm> const vm(
+        createVmAndLoadCode(X86Lab::Vm::CpuMode::ProtectedMode, assembly));
 
     // Check the values of the general purpose registers (r8-r15 are ignored
     // since we are running in 32 bits, those are expected to be zero).
     // @param rax, ..., rsp: The expected values of the GP registers.
     auto const checkRegs([&](u64 rax, u64 rbx, u64 rcx, u64 rdx,
                              u64 rdi, u64 rsi, u64 rbp, u64 rsp) {
-        X86Lab::Vm::State::Registers const regs(vm.getRegisters());
+        X86Lab::Vm::State::Registers const regs(vm->getRegisters());
         assert(regs.rax == rax); assert(regs.rbx == rbx);
         assert(regs.rcx == rcx); assert(regs.rdx == rdx);
         assert(regs.rdi == rdi); assert(regs.rsi == rsi);
@@ -231,7 +237,7 @@ static void testProtectedMode() {
     // runnable.
     auto const runNSteps([&](u32 const n) {
         for (u32 i(0); i < n; ++i) {
-            assert(vm.step() == X86Lab::Vm::OperatingState::Runnable);
+            assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
         }
     });
 
@@ -319,12 +325,8 @@ static void testLongMode() {
 
         hlt
     )");
-
-    std::string const fileName(writeCode(assembly));
-    std::shared_ptr<Assembler::Code> const code(Assembler::assemble(fileName));
-
-    X86Lab::Vm vm(X86Lab::Vm::CpuMode::LongMode, 1);
-    vm.loadCode(code->machineCode(), code->size());
+    std::unique_ptr<X86Lab::Vm> const vm(
+        createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly));
 
     // Check the values of the general purpose registers
     // @param rax, ..., r15: The expected values of the GP registers.
@@ -332,7 +334,7 @@ static void testLongMode() {
                              u64 rdi, u64 rsi, u64 rbp, u64 rsp,
                              u64 r8,  u64 r9,  u64 r10, u64 r11,
                              u64 r12, u64 r13, u64 r14, u64 r15) {
-        X86Lab::Vm::State::Registers const regs(vm.getRegisters());
+        X86Lab::Vm::State::Registers const regs(vm->getRegisters());
         assert(regs.rax == rax); assert(regs.rbx == rbx);
         assert(regs.rcx == rcx); assert(regs.rdx == rdx);
         assert(regs.rdi == rdi); assert(regs.rsi == rsi);
@@ -348,7 +350,7 @@ static void testLongMode() {
     // runnable.
     auto const runNSteps([&](u32 const n) {
         for (u32 i(0); i < n; ++i) {
-            assert(vm.step() == X86Lab::Vm::OperatingState::Runnable);
+            assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
         }
     });
 
@@ -420,37 +422,33 @@ static void testReadSegmentRegisters() {
     )");
     // Notice the nop after the mov to SS. This is needed because moving to SS
     // inhibits the interrupts until after the next instruction has executed.
-    // Hence, if we are to call vm.step() on the "mov  ss, ax", we would in fact
+    // Hence, if we are to call vm->step() on the "mov  ss, ax", we would in fact
     // run two instrutions. Without the nop this would run the mov and the hlt,
     // leaving the VM in a non-runnable operatingState.
-
-    std::string const fileName(writeCode(assembly));
-    std::shared_ptr<Assembler::Code> const code(Assembler::assemble(fileName));
-
-    X86Lab::Vm vm(X86Lab::Vm::CpuMode::RealMode, 1);
-    vm.loadCode(code->machineCode(), code->size());
+    std::unique_ptr<X86Lab::Vm> const vm(
+        createVmAndLoadCode(X86Lab::Vm::CpuMode::RealMode, assembly));
 
     // Run the VM for N steps, asserting at each step that the Vm is still
     // runnable.
     auto const runNSteps([&](u32 const n) {
         for (u32 i(0); i < n; ++i) {
-            assert(vm.step() == X86Lab::Vm::OperatingState::Runnable);
+            assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
         }
     });
 
     // Run first instruction, this sets CS to 0x1.
     runNSteps(1);
-    assert(vm.getRegisters().cs == 0x1);
+    assert(vm->getRegisters().cs == 0x1);
     runNSteps(2);
-    assert(vm.getRegisters().ds == 0xDDDD);
+    assert(vm->getRegisters().ds == 0xDDDD);
     runNSteps(2);
-    assert(vm.getRegisters().es == 0xEEEE);
+    assert(vm->getRegisters().es == 0xEEEE);
     runNSteps(2);
-    assert(vm.getRegisters().fs == 0xFFFF);
+    assert(vm->getRegisters().fs == 0xFFFF);
     runNSteps(2);
-    assert(vm.getRegisters().gs == 0x1111);
+    assert(vm->getRegisters().gs == 0x1111);
     runNSteps(2);
-    assert(vm.getRegisters().ss == 0x2222);
+    assert(vm->getRegisters().ss == 0x2222);
 }
 
 // Check that getRegisters returns the correct values for GDTR and IDTR.
@@ -481,19 +479,15 @@ static void testReadGdtIdt() {
         dw 0xABC7
         dq 0xFFFFFFF8ABCDEF12
     )");
-
-    std::string const fileName(writeCode(assembly));
-    std::shared_ptr<Assembler::Code> const code(Assembler::assemble(fileName));
-
-    X86Lab::Vm vm(X86Lab::Vm::CpuMode::LongMode, 1);
-    vm.loadCode(code->machineCode(), code->size());
+    std::unique_ptr<X86Lab::Vm> const vm(
+        createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly));
 
     // Run the lgdt and lidt instructions.
-    assert(vm.step() == X86Lab::Vm::OperatingState::Runnable);
-    assert(vm.step() == X86Lab::Vm::OperatingState::Runnable);
+    assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+    assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
 
     // Check the reported values.
-    X86Lab::Vm::State::Registers const regs(vm.getRegisters());
+    X86Lab::Vm::State::Registers const regs(vm->getRegisters());
     assert(regs.gdt.base == 0xFFFFFFF8CAFEBABE);
     assert(regs.gdt.limit == 0x8887);
     assert(regs.idt.base == 0xFFFFFFF8ABCDEF12);
@@ -542,25 +536,21 @@ static void testReadControlRegisters() {
 
         hlt
     )");
+    std::unique_ptr<X86Lab::Vm> const vm(
+        createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly));
 
-    std::string const fileName(writeCode(assembly));
-    std::shared_ptr<Assembler::Code> const code(Assembler::assemble(fileName));
-
-    X86Lab::Vm vm(X86Lab::Vm::CpuMode::LongMode, 1);
-    vm.loadCode(code->machineCode(), code->size());
-
-    X86Lab::Vm::State::Registers const prev(vm.getRegisters());
+    X86Lab::Vm::State::Registers const prev(vm->getRegisters());
 
     auto const runNSteps([&](u32 const n) {
         for (u32 i(0); i < n; ++i) {
-            assert(vm.step() == X86Lab::Vm::OperatingState::Runnable);
+            assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
         }
     });
     // Execute all 19 instructions (not the hlt).
     runNSteps(19);
 
     // Check the new values of the control regs.
-    X86Lab::Vm::State::Registers const regs(vm.getRegisters());
+    X86Lab::Vm::State::Registers const regs(vm->getRegisters());
     assert(regs.cr0 == (prev.cr0 ^ ((1 << 30) | (1 << 29))));
     assert(regs.cr2 == 0xDEADBEEFCAFEBABE);
     assert(regs.cr3 == (prev.cr3 ^ (1 << 3)));
@@ -585,14 +575,10 @@ static void testSetRegisters() {
         nop
         hlt
     )");
+    std::unique_ptr<X86Lab::Vm> const vm(
+        createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly));
 
-    std::string const fileName(writeCode(assembly));
-    std::shared_ptr<Assembler::Code> const code(Assembler::assemble(fileName));
-
-    X86Lab::Vm vm(X86Lab::Vm::CpuMode::LongMode, 1);
-    vm.loadCode(code->machineCode(), code->size());
-
-    X86Lab::Vm::State::Registers expected(vm.getRegisters());
+    X86Lab::Vm::State::Registers expected(vm->getRegisters());
 
     // Set GPs to arbitrary values.
     expected.rax = 0x1111111111111111;
@@ -634,12 +620,12 @@ static void testSetRegisters() {
     expected.rflags ^= (1 << 9);
 
     // Set the registers on the VM.
-    vm.setRegisters(expected);
+    vm->setRegisters(expected);
 
     // Run the single nop instruction.
-    assert(vm.step() == X86Lab::Vm::OperatingState::Runnable);
+    assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
 
-    X86Lab::Vm::State::Registers current(vm.getRegisters());
+    X86Lab::Vm::State::Registers current(vm->getRegisters());
     // The NOP instruction does not change RFLAGS. However it incremented RIP by
     // one. Fixup RIP before doing the comparison with operator==.
     current.rip --;
@@ -657,6 +643,41 @@ static void testSetRegisters() {
     assert(current == expected);
 }
 
+// Test that values of segment registers are ignored when calling setRegisters,
+// as writing those is not supported.
+static void testSetRegistersSegmentRegisters() {
+    // We are not actually running the VM in this test, merely setting the
+    // registers.
+    std::string const assembly(R"(
+        BITS 64
+        nop
+    )");
+    std::unique_ptr<X86Lab::Vm> const vm(
+        createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly));
+
+    X86Lab::Vm::State::Registers const origRegs(vm->getRegisters());
+    X86Lab::Vm::State::Registers regs(origRegs);
+    // Attempt to set the segment registers to their 1-complement value.
+    regs.cs = !regs.cs;
+    regs.ds = !regs.ds;
+    regs.es = !regs.es;
+    regs.fs = !regs.fs;
+    regs.gs = !regs.gs;
+    regs.ss = !regs.ss;
+
+    vm->setRegisters(regs);
+
+    // Re-read the registers and make sure that the segment registers did not
+    // change.
+    X86Lab::Vm::State::Registers const currRegs(vm->getRegisters());
+    assert(currRegs.cs == origRegs.cs);
+    assert(currRegs.ds == origRegs.ds);
+    assert(currRegs.es == origRegs.es);
+    assert(currRegs.fs == origRegs.fs);
+    assert(currRegs.gs == origRegs.gs);
+    assert(currRegs.ss == origRegs.ss);
+}
+
 // Run all the tests under this namespace.
 void run() {
     testReadRipAndRflags();
@@ -667,5 +688,6 @@ void run() {
     testReadGdtIdt();
     testReadControlRegisters();
     testSetRegisters();
+    testSetRegistersSegmentRegisters();
 }
 }

@@ -103,6 +103,8 @@ void Vm::setRegisters(State::Registers const& registerValues) {
     // them in the call to KVM_SET_SREGS.
     kvm_sregs sregs(Util::Kvm::getSRegs(vcpuFd));
 
+    // Set the control registers, efer and the IDT/GDT. Segment registers are
+    // left untouched since setting those using setRegisters is not supported.
     sregs.cr0 = registerValues.cr0;
     sregs.cr2 = registerValues.cr2;
     sregs.cr3 = registerValues.cr3;

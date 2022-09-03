@@ -142,10 +142,12 @@ public:
     // the time after the last instruction was executed.
     State::Registers getRegisters() const;
 
-    // Set the values of the registers on the vCpu. Not that all registers are
-    // set.
-    // @param registerValues: A State::Registers holding all the values that should
-    // be written.
+    // Set the values of the registers on the vCpu. For now, setting segment
+    // register values through this functions is NOT supported, therefore the
+    // values of cs, ds, es, fs, gs and ss in `registerValues` are ignored.
+    // Control registers, EFER, IDT and GDT are supported.
+    // @param registerValues: A State::Registers holding all the values that
+    // should be written.
     // @throws: KvmError in case of any KVM ioctl error.
     void setRegisters(State::Registers const& registerValues);
 
