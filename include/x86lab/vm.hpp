@@ -180,26 +180,13 @@ private:
     // register values.
     void setRegistersInitialValue(CpuMode const mode);
 
-    // Enable 32-bit protected mode on the vCpu. This does NOT enable paging.
-    // Note that using this function does not setup a GDT. It merely sets the
-    // segment registers' hidden base/limit/access flags so that the vCpu is
-    // tricked into using 32-bit PM. GDTR is left untouched, therefore code
-    // running (in the Vm) after calling this function mustn't reload segment
-    // registers as this would cause an exception (unless you actually setup a
-    // GDT and GDTR yourself before hand.
-    // The segmentation model used is flat-segments, e.g segments have base 0
-    // and limit 0xFFFFF with 4KiB page granularity.
-    // All segments are in ring 0.
-    // @throws: KvmError in case of any KVM ioctl error.
-    void enableProtectedMode();
-
-    // Enable 64-bit/Long mode on the vCpu. This function does setup a simple
-    // paging setup where the first 1GiB of the guest physical memory is
-    // identity mapped. As with enableProtectedMode() there no GDT is setup,
-    // instead segment registers have their hidden written.
-    // @throws: KvmError in case of any KVM ioctl error, MmapError in case of a
-    // mmap error.
-    void enable64BitsMode();
+    // Setup the control registers to enable the requested cpu mode.
+    // @param sregs: The kvm_sregs structure containing the control registers
+    // that need to be initialized for the cpu mode.
+    // @param mode: The mode to enable on the vcpu.
+    // Note: In the case mode == CpuMode::LongMode, this function also sets up
+    // the page tables to have identity mapping.
+    void enableCpuMode(kvm_sregs& sregs, CpuMode const mode);
 
     // Add more physical memory to the guest.
     // @param offset: The offset at which the memory should be added.
@@ -226,7 +213,5 @@ private:
     void *memory;
     // The current OperatingState of the KVM.
     OperatingState currState;
-    // Is the state of the VM currently real mode.
-    bool isRealMode;
 };
 }

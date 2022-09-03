@@ -38,8 +38,7 @@ Vm::Vm(CpuMode const startMode, u64 const memorySize) :
     usedMemorySlots(0),
     physicalMemorySize(memorySize * PAGE_SIZE),
     memory(addPhysicalMemory(0x0, physicalMemorySize)),
-    currState(OperatingState::NoCodeLoaded),
-    isRealMode(startMode == CpuMode::RealMode)
+    currState(OperatingState::NoCodeLoaded)
     {
     // Disable any MSR access filtering. KVM's doc indicate that if this is not
     // done then the default behaviour is used. However it's not really clear if
@@ -64,26 +63,6 @@ void Vm::loadCode(u8 const * const shellCode, u64 const shellCodeSize) {
     State::Registers regs(getRegisters());
     regs.rip = 0x0;
     setRegisters(regs);
-
-    // One tricky thing that we need to deal with is the value of CS after INIT
-    // or RESET which is set to 0xF000. Additionally, the hidden base of CS is
-    // set to 0xFFFF0000 and EIP to 0xFFF0, this is done so that the first
-    // instruction executed by the cpu is at 0xFFFFFFF0.
-    // KVM obviously does this. However, since we are doing everything
-    // ourselves, we have two options:
-    //  1. Set a jmp @ 0xFFFFFFF0 to jump to the first instruction.
-    //  2. Overwrite the hidden base and CS to 0.
-    // Option 1 would mean having to map another page in the guest physical
-    // memory (namely at 0xFFFFF000) and that the first call to step() does not
-    // actually run the first instruction. Option 2 is easier to implement.
-    kvm_sregs sregs(Util::Kvm::getSRegs(vcpuFd));
-    sregs.cs.base = 0x0;
-    // Per Intel's documentation, if the guest is running in real-mode then the
-    // limit MUST be 0xFFFF. See "26.3.1.2 Checks on Guest Segment Registers" in
-    // Vol. 3C.
-    sregs.cs.limit = 0xFFFF;
-    sregs.cs.selector = 0;
-    Util::Kvm::setSRegs(vcpuFd, sregs);
 
     // The KVM is now runnable.
     currState = OperatingState::Runnable;
@@ -123,30 +102,6 @@ void Vm::setRegisters(State::Registers const& registerValues) {
     // Hence for those missing values, we read the current kvm_sregs to re-use
     // them in the call to KVM_SET_SREGS.
     kvm_sregs sregs(Util::Kvm::getSRegs(vcpuFd));
-
-    sregs.cs.selector = registerValues.cs;
-    sregs.ds.selector = registerValues.ds;
-    sregs.es.selector = registerValues.es;
-    sregs.fs.selector = registerValues.fs;
-    sregs.gs.selector = registerValues.gs;
-    sregs.ss.selector = registerValues.ss;
-
-    if (isRealMode) {
-        // When operating in real-mode it seems that we need to manually set the
-        // hidden base and limit of each segment register.
-        sregs.cs.base = sregs.cs.selector << 4;
-        sregs.cs.limit = 0xFFFF;
-        sregs.ds.base = sregs.ds.selector << 4;
-        sregs.ds.limit = 0xFFFF;
-        sregs.es.base = sregs.es.selector << 4;
-        sregs.es.limit = 0xFFFF;
-        sregs.fs.base = sregs.fs.selector << 4;
-        sregs.fs.limit = 0xFFFF;
-        sregs.gs.base = sregs.gs.selector << 4;
-        sregs.gs.limit = 0xFFFF;
-        sregs.ss.base = sregs.ss.selector << 4;
-        sregs.ss.limit = 0xFFFF;
-    }
 
     sregs.cr0 = registerValues.cr0;
     sregs.cr2 = registerValues.cr2;
@@ -200,14 +155,166 @@ Vm::OperatingState Vm::step() {
     return currState;
 }
 
-void Vm::setRegistersInitialValue(CpuMode const mode) {
-    // Now setup the requested mode. If startMode == CpuMode::RealMode then we
-    // have nothing to do as this is the default mode in KVM.
-    if (mode == CpuMode::ProtectedMode) {
-        enableProtectedMode();
-    } else if (mode == CpuMode::LongMode) {
-        enable64BitsMode();
+// See computeSegmentRegister.
+enum class SegmentType {
+    Code,
+    Data,
+};
+
+// Compute the value of the hidden parts of a segment register to represent a
+// flat segment of the given type in the given cpu mode.
+// For mode == RealMode, code and data segments are set to 0.
+// For mode == ProtectedMode, code and data segments are set to have base 0 and
+// limit 0xFFFFF with page granularity (eg. segments cover the entire 4GiB addr
+// space). Code segment is read-only and data segment is read-write. DPL is set
+// to 0.
+// For mode == LongMode, code and data segments are set to 64-bit flat segments
+// with DPL == 0. Since there is no segmentation in 64-bit, this is equivalent
+// to have base == 0 and limit == ~0.
+// @param mode: The cpu mode. This is required because segment registers are
+// interpreted differently depending in which mode the cpu is running.
+// @param type: Indicate if the segment should be a code segment or data
+// segment.
+// @param rflags: The current value of rflags on the guest.
+// @return: A kvm_segment with the hidden parts set accordingly.
+static kvm_segment computeSegmentRegister(Vm::CpuMode const mode,
+                                          SegmentType const type,
+                                          u64 const rflags) {
+    // VMX is _very_ peculiar about the state of the segment registers (hidden
+    // parts) upon a VMentry. AFAIK, the kvm implementation of the Linux kernel
+    // does not help us here (except for the accessed flag which is set in
+    // https://elixir.bootlin.com/linux/v5.19.6/source/arch/x86/kvm/vmx/vmx.c
+    // line 3420. Hence we need to do our best to follows VMX expectations,
+    // everything we need to know about segment registers is described in the
+    // Intel's manual vol. 3, "26.3.1.2 Checks on Guest Segment Registers".
+    // This leaves something rather obvious: we are here targetting Intel's VMX,
+    // and therefore this might not work with AMD's SVM as its spec probably
+    // differs in that regards.
+
+    if (rflags & (1 << 17)) {
+        // Bit 17 in RFLAGS indicate that the guest is running in virtual-8086
+        // mode, which imposes different requirements compared to "normal" real
+        // mode, protected mode or IA-32e mode.
+        // For now we don't support setting the segment registers if the guest
+        // is staring in virtual 8086 mode.
+        throw Error("Guest startup in virtual8086 mode not supported", 0);
     }
+
+    kvm_segment seg{};
+
+    // Few restrictions on the selector. It's value is irrelevant for execution
+    // since it is the hidden parts that are used for logical address
+    // translation.
+    // Nevertheless, in the case of SS, the RPL in the selector must be equal to
+    // CS's RPL. Since we are running everything in ring 0 this is by default.
+    // For TR and LDTR, the TI bit must be 0.
+    seg.selector = 0;
+
+    // The base address must be canonical and bits 63:32 must be 0. GS and FS
+    // do not have this restriction.
+    seg.base = 0x0;
+
+    // No restriction on limit if we are not in virtual8086 mode. Hence set it
+    // to the max.
+    // Note that this value is expressed in byte, even if the corresponding
+    // segment is using page granularity.
+    seg.limit = 0xFFFFFFFF;
+
+    // Type:
+    //  - For CS this must be either 3, 9, 11, 13 or 15.
+    //  - For SS this must be either 3 or 7.
+    //  - DS, ES, FS and GS do not have restrictions on type.
+    // Note that the accessed flag must be set, hence add 1 to the type above.
+    // In our case we can use 9 for CS and 3 for all the other segment
+    // registers.
+    seg.type = (type == SegmentType::Code) ? 0xb : 0x3;
+
+    // Must be 1.
+    seg.present = 1;
+
+    // Won't go into details here, the DPL of CS and SS are related and in
+    // general related to the selector's RPL. Setting everything to 0 here is
+    // valid.
+    seg.dpl = 0;
+
+    // Only set if the current mode is 32-bit (this indicates 32-bit default
+    // operation size).
+    seg.db = !!(mode == Vm::CpuMode::ProtectedMode);
+
+    // Must be 1.
+    seg.s = 1;
+
+    // Only set if the current mode is 64-bit. If L is set then DB must be
+    // unset.
+    seg.l = !!(mode == Vm::CpuMode::LongMode);
+
+    // Granularity bit:
+    //  - If any bit in limit[11:0] is 0 then G must be 0.
+    //  - If any bit in limit[31:20] is 1, then G must be 1.
+    // This might seem odd at first, but I think this is explained by the
+    // following:
+    // When a segment register is loaded with a descriptor using page
+    // granularity (e.g. G is set), Intel's documentation specifies that the
+    // bottom 12 bits of the hidden limit are ignored when checking offsets.
+    // However the documentation does not specify what those bits are. After
+    // experimenting a bit (pun intended), it seems that those 12 lower bits are
+    // set to 1. This is why having any 0 in limit[11:0] implies that G must be
+    // 0.
+    // If there are any set bit in limit[31:20] then we are obviously using page
+    // granularity (e.g. G is set) since the limit field in a segment descriptor
+    // is only 20 bits. Having limit[31:20] != 0 implies that a shift occured:
+    // the shift to translate the page granularity to the bytes limit in the
+    // hidden part.
+    // This leaves one corner case: what if limit[11:0] == 111...111 and
+    // limit[31:20] is 0. Such a limit would be valid for both byte and page
+    // granularity and therefore imposes no restriction on the G bit.
+    // In our case, we want a flat segment model spanning the entire address
+    // space hence use page granularity.
+    seg.g = 1;
+
+    // Indicate if this segment is usuable or not. I imagine this is used by the
+    // micro-arch to know if the segment register has been initialized.
+    // In our case, we want all segment registers to be defined/initialized
+    // hence unset the bit.
+    seg.unusable = 0;
+    return seg;
+}
+
+void Vm::setRegistersInitialValue(CpuMode const mode) {
+    kvm_sregs sregs(Util::Kvm::getSRegs(vcpuFd));
+
+    // Setup the control registers for the requested cpu mode.
+    enableCpuMode(sregs, mode);
+
+    // Setup the segment registers.
+    u64 const initialRflags(0x2);
+    sregs.cs = computeSegmentRegister(mode, SegmentType::Code, initialRflags);
+    sregs.ds = computeSegmentRegister(mode, SegmentType::Data, initialRflags);
+    sregs.es = sregs.ds;
+    sregs.fs = sregs.ds;
+    sregs.gs = sregs.ds;
+    sregs.ss = sregs.ds;
+
+    // VMX allows us to set the LDTR to unusable. Do that so we don't have to
+    // bother carefully crafting a valid value.
+    sregs.ldt.unusable = 1;
+
+    // Not so lucky with TR, which cannot be unusable. Set it up to an empty
+    // segment (e.g NULL entry in GDT). This is fine, as long as the code is not
+    // trying to execute a task without setting up the proper data-structures
+    // first.
+    // Per Intel's docs, type must be 11 (so it works in all CpuModes), s must
+    // be 0, present must be 1, base and limit are free so set them to 0x0 so we
+    // get an exception in case we try to exec the task.
+    sregs.tr.selector = 0;
+    sregs.tr.type = 11;
+    sregs.tr.s = 0;
+    sregs.tr.present = 1;
+    sregs.tr.base = 0x0;
+    sregs.tr.limit = 0x0;
+    sregs.tr.g = 0;
+
+    Util::Kvm::setSRegs(vcpuFd, sregs);
 
     // Honor the documented initial values of the registers. Don't touch the
     // segment registers as those have been set when enabling the requested cpu
@@ -217,142 +324,70 @@ void Vm::setRegistersInitialValue(CpuMode const mode) {
     regs.rdi = 0;  regs.rsi = 0;  regs.rsp = 0;  regs.rbp = 0;
     regs.r8  = 0;  regs.r9  = 0;  regs.r10 = 0;  regs.r11 = 0;
     regs.r12 = 0;  regs.r13 = 0;  regs.r14 = 0;  regs.r15 = 0;
-    regs.rflags = 0x2;
+    regs.rflags = initialRflags;
     // rip will be set when loading code.
     regs.gdt.base = 0; regs.gdt.limit = 0;
     regs.idt.base = 0; regs.idt.limit = 0;
     setRegisters(regs);
 }
 
-void Vm::enableProtectedMode() {
-    kvm_sregs sregs(Util::Kvm::getSRegs(vcpuFd));
+void Vm::enableCpuMode(kvm_sregs& sregs, CpuMode const mode) {
+    if (mode == CpuMode::RealMode) {
+        // RealMode does not need to set anything. Assuming that by default KVM
+        // starts in real mode.
+        return;
+    }
 
-    // Enable protected mode.
+    // Both protected mode and long mode require having the PE bit (bit 0) set
+    // in CR0.
+    // For protected mode that's all we need, since we are not enabling paging.
     sregs.cr0 |= 1;
 
-    // Set the hidden parts of the segment registers.
-    // The selectors are not exactly required, because the CPU uses the hidden
-    // parts anyway. We set it here so that it is non-zero when showing register
-    // values.
+    if (mode == CpuMode::LongMode) {
+        // 64-bit is a bit more involved. We need to setup multiple control
+        // registers as well as the EFER MSR and setup paging as this is
+        // required in 64-bit.
 
-    // Flat code segment.
-    sregs.cs.selector = 0x0;
-    sregs.cs.base = 0;
-    sregs.cs.limit = 0xFFFFF;
-    sregs.cs.type = 10;
-    sregs.cs.present = 1;
-    sregs.cs.dpl = 0;
-    sregs.cs.db = 1;
-    sregs.cs.s = 1;
-    sregs.cs.l = 0;
-    sregs.cs.g = 1;
-    sregs.cs.avl = 0;
-    // Per Intel's documentation unusable must be 0 for the access flags to be
-    // loaded in the segment register when entering the VM.
-    sregs.cs.unusable = 0;
+        // Setup paging. We can allocate the pages used for the PML4 and PDPT
+        // after the requested memory.
 
-    // Flat R/W data and stack segments.
-    sregs.ds.selector = 0x10;
-    sregs.ds.base = 0;
-    sregs.ds.limit = 0xFFFFF;
-    sregs.ds.type = 2;
-    sregs.ds.present = 1;
-    sregs.ds.dpl = 0;
-    sregs.ds.db = 1;
-    sregs.ds.s = 1;
-    sregs.ds.l = 0;
-    sregs.ds.g = 1;
-    sregs.ds.avl = 0;
-    sregs.ds.unusable = 0;
+        // These are guaranteed to be page aligned since the physical memory
+        // size is a multiple of page size.
+        u64 const pml4Offset(physicalMemorySize);
+        u64 const pdptOffset(pml4Offset + PAGE_SIZE);
+        assert(!(pml4Offset % PAGE_SIZE));
 
-    sregs.es = sregs.ds;
-    sregs.fs = sregs.ds;
-    sregs.gs = sregs.ds;
-    sregs.ss = sregs.ds;
+        // Userspace addresses for the PML4 and PDPT.
+        void * const pml4Addr(addPhysicalMemory(pml4Offset, PAGE_SIZE));
+        void * const pdptAddr(addPhysicalMemory(pdptOffset, PAGE_SIZE));
 
-    Util::Kvm::setSRegs(vcpuFd, sregs);
-}
+        // FIXME: As of now we only R/W Identity-Map the first 1GiB. Because we
+        // are lazy we use huge 1GiB pages. Everything is in supervisor mode.
+        // Entry 0: Pointing to the allocated PDPT with R/W permission.
+        *reinterpret_cast<u64*>(pml4Addr) =
+            (pdptOffset & 0xFFFFFFFFFFFFF000ULL) | 3;
+        // Entry 0: Pointing to 1GiB frame starting at offset 0, R/W
+        // permissions.
+        // Bit 7 indicates that this is a 1GiB page.
+        *reinterpret_cast<u64*>(pdptAddr) = (1 << 7) | 3;
 
-void Vm::enable64BitsMode() {
-    // First off we need to setup a set of page tables, as paging is mandatory
-    // when in Long Mode.
-    // We can allocate the pages used for the PML4 and PDPT after the requested
-    // memory.
-    
-    // These are guaranteed to be page aligned since the physical memory size is
-    // a multiple of page size.
-    u64 const pml4Offset(physicalMemorySize);
-    u64 const pdptOffset(pml4Offset + PAGE_SIZE);
-    assert(!(pml4Offset % PAGE_SIZE));
+        // Page table is ready now setup the control registers as they would be
+        // in long mode.
+        // Enable Physical Address Extension (PAE) in Cr4 (bit 5) , mandatory
+        // for 64-bits.
+        sregs.cr4 |= (1 << 5);
 
-    // Userspace addresses for the PML4 and PDPT.
-    void * const pml4Addr(addPhysicalMemory(pml4Offset, PAGE_SIZE));
-    void * const pdptAddr(addPhysicalMemory(pdptOffset, PAGE_SIZE));
+        // Load PML4 into CR3.
+        sregs.cr3 = pml4Offset & 0xFFFFFFFFFFFFF000ULL;
 
-    // FIXME: As of now we only R/W Identity-Map the first 1GiB. Because we are
-    // lazy we use huge 1GiB pages. Everything is in supervisor mode.
-    // Entry 0: Pointing to the allocated PDPT with R/W permission.
-    *reinterpret_cast<u64*>(pml4Addr) = (pdptOffset & 0xFFFFFFFFFFFFF000ULL) | 3;
-    // Entry 0: Pointing to 1GiB frame starting at offset 0, R/W permissions.
-    // Bit 7 indicates that this is a 1GiB page.
-    *reinterpret_cast<u64*>(pdptAddr) = (1 << 7) | 3;
+        // Set LME (bit 8) and LMA (bit 10) bits in EFER.
+        sregs.efer |= ((1 << 8) | (1 << 10));
 
-    // Page table is ready now setup the registers as they would be in long
-    // mode.
-    kvm_sregs sregs(Util::Kvm::getSRegs(vcpuFd));
-
-    // Enable PAE, mandatory for 64-bits.
-    sregs.cr4 = 0x20;
-
-    // Load PML4 into CR3.
-    sregs.cr3 = pml4Offset & 0xFFFFFFFFFFFFF000ULL;
-
-    // Set LME and LMA bits to 1 in EFER.
-    sregs.efer = 0x500;
-
-    // CR0: Enable PG and PE bits.
-    // Enable PG bit in CR0. FIXME: Remove the Cache Disable and Not
-    // Write-through bits.
-    // Note: Per Intel's documentation if PG is 1 then PE (bit 0) must be 1 as
-    // well. Otherwise VMX entry fails.
-    sregs.cr0 = 0xe0000011;
-
-    // Setup segment registers' hidden parts.
-    sregs.cs.selector = 0;
-    sregs.cs.base = 0;
-    sregs.cs.limit = 0xFFFFFFFF;
-    sregs.cs.type = 0xa;
-    sregs.cs.present = 1;
-    sregs.cs.dpl = 0;
-    sregs.cs.db = 0;
-    sregs.cs.s = 1;
-    sregs.cs.l = 1;
-    sregs.cs.g = 1;
-    sregs.cs.avl = 0;
-    // Per Intel's documentation unusable must be 0 for the access flags to be
-    // loaded in the segment register when entering the VM.
-    sregs.cs.unusable = 0;
-
-    // Flat R/W data and stack segments.
-    sregs.ds.selector = 0;
-    sregs.ds.base = 0;
-    sregs.ds.limit = 0xFFFFFFFF;
-    sregs.ds.type = 2;
-    sregs.ds.present = 1;
-    sregs.ds.dpl = 0;
-    sregs.ds.db = 1;
-    sregs.ds.s = 1;
-    sregs.ds.l = 0;
-    sregs.ds.g = 1;
-    sregs.ds.avl = 0;
-    sregs.ds.unusable = 0;
-
-    sregs.es = sregs.ds;
-    sregs.fs = sregs.ds;
-    sregs.gs = sregs.ds;
-    sregs.ss = sregs.ds;
-
-    Util::Kvm::setSRegs(vcpuFd, sregs);
+        // CR0: Enable paging bit (PG, bit 31). PE has been enabled already
+        // above.
+        assert(sregs.cr0 & 1);
+        sregs.cr0 |= (1UL << 31);
+    }
 }
 
 void* Vm::addPhysicalMemory(u64 const offset, size_t const size) {
