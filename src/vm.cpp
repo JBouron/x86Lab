@@ -36,7 +36,7 @@ Vm::Vm(CpuMode const startMode, u64 const memorySize) :
     vcpuFd(Util::Kvm::createVcpu(vmFd)),
     kvmRun(Util::Kvm::getVcpuRunStruct(vcpuFd)),
     physicalMemorySize(memorySize * PAGE_SIZE),
-    memory(addPhysicalMemory(physicalMemorySize, false)),
+    memory(addPhysicalMemory(memorySize, false)),
     currState(OperatingState::NoCodeLoaded)
     {
     // Disable any MSR access filtering. KVM's doc indicate that if this is not
@@ -359,8 +359,8 @@ void Vm::enableCpuMode(kvm_sregs& sregs, CpuMode const mode) {
         assert(!(pml4Offset % PAGE_SIZE));
 
         // Userspace addresses for the PML4 and PDPT.
-        void * const pml4Addr(addPhysicalMemory(PAGE_SIZE, true));
-        void * const pdptAddr(addPhysicalMemory(PAGE_SIZE, true));
+        void * const pml4Addr(addPhysicalMemory(1, true));
+        void * const pdptAddr(addPhysicalMemory(1, true));
 
         // FIXME: As of now we only R/W Identity-Map the first 1GiB. Because we
         // are lazy we use huge 1GiB pages. Everything is in supervisor mode.
@@ -391,19 +391,19 @@ void Vm::enableCpuMode(kvm_sregs& sregs, CpuMode const mode) {
     }
 }
 
-void* Vm::addPhysicalMemory(size_t const size, bool const isReadOnly) {
-    assert(!(size % PAGE_SIZE));
-
+void* Vm::addPhysicalMemory(u32 const numPages, bool const isReadOnly) {
     if (memorySlots.size() == Util::Kvm::getMaxMemSlots(vmFd)) {
         // We are already using as many slots as we can. Note this will most
         // likely never happen as KVM reports 32k slots on most machines.
         throw KvmError("Reached max. number of memory slots on VM", 0);
     }
 
+    u64 const allocSize(numPages * PAGE_SIZE);
+
     // Mmap some anonymous memory for the requested size.
     int const prot(PROT_READ | PROT_WRITE);
     int const flags(MAP_PRIVATE | MAP_ANONYMOUS);
-    void * const userspace(::mmap(NULL, size, prot, flags, -1, 0));
+    void * const userspace(::mmap(NULL, allocSize, prot, flags, -1, 0));
     if (memory == MAP_FAILED) {
         throw MmapError("Failed to mmap memory for guest", errno);
     }
@@ -421,7 +421,7 @@ void* Vm::addPhysicalMemory(size_t const size, bool const isReadOnly) {
         .slot = static_cast<u32>(memorySlots.size()),
         .flags = static_cast<u32>(isReadOnly ? KVM_MEM_READONLY : 0),
         .guest_phys_addr = phyAddr,
-        .memory_size = size,
+        .memory_size = allocSize,
         .userspace_addr = reinterpret_cast<u64>(userspace),
     });
     if (::ioctl(vmFd, KVM_SET_USER_MEMORY_REGION, &kvmMap) == -1) {

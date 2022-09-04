@@ -193,14 +193,13 @@ private:
 
     // Add more physical memory to the guest. The added memory starts at the end
     // of the current physical memory.
-    // @param size: The amount of memory to add to the guest in bytes. Must be a
-    // multiple of PAGE_SIZE.
+    // @param numPages: The number of physical pages frames to allocate.
     // @param isReadOnly: Indicate if this memory should be read-only for the
     // guest VM. The user-space (e.g. this program) always have write permission
     // on the allocated memory regardless of the value of isReadOnly.
     // @return: The userspace address of the allocated memory.
     // @throws: KvmError or MmapError in case of kvm ioctl error or mmap error.
-    void *addPhysicalMemory(size_t const size, bool const isReadOnly);
+    void *addPhysicalMemory(u32 const numPages, bool const isReadOnly);
 
     // File descriptor for the KVM.
     int const vmFd;
