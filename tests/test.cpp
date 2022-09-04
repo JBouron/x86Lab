@@ -73,7 +73,7 @@ private:
 
 
 // The global TestCollection, containing all the tests to be run.
-static TestCollection TEST_COLLECTION;
+static constinit TestCollection TEST_COLLECTION;
 
 TestRegistration::TestRegistration(TestFunc const& func,
                                    std::string const& name) {
