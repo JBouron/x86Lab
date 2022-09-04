@@ -1,10 +1,6 @@
-#include <iostream>
-
-namespace X86Lab::Test::Vm {
-    extern void run();
-}
+#include <x86lab/test.hpp>
 
 int main() {
-    X86Lab::Test::Vm::run();
+    X86Lab::Test::runAllTests();
     return 0;
 }

@@ -1,6 +1,6 @@
 #include <x86lab/vm.hpp>
 #include <x86lab/assembler.hpp>
-#include <cassert>
+#include <x86lab/test.hpp>
 #include <fstream>
 
 // Various tests for the X86Lab::Vm.
@@ -40,7 +40,7 @@ static std::unique_ptr<X86Lab::Vm> createVmAndLoadCode(
 
 // The simplest test there is: Execute a few NOPs and make sure as well as
 // RFALGS are as expected.
-static void testReadRipAndRflags() {
+DECLARE_TEST(testReadRipAndRflags) {
     // Note: Each instruction is 1 byte long except for xor rax, rax which is 3
     // bytes.
     std::string const assembly(R"(
@@ -57,44 +57,44 @@ static void testReadRipAndRflags() {
 
     // Make sure that the VM starts executing the code with interrupts disabled.
     X86Lab::Vm::State::Registers regs(vm->getRegisters());
-    assert(!(regs.rflags & (1 << 9)));
+    TEST_ASSERT(!(regs.rflags & (1 << 9)));
     u64 const codeStart(regs.rip);
 
     // Run sti.
-    assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+    TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
     regs = vm->getRegisters();
     // Interrupts are expected to be enabled at that point.
-    assert(regs.rflags & (1 << 9));
-    assert(regs.rip == codeStart + 1);
+    TEST_ASSERT(regs.rflags & (1 << 9));
+    TEST_ASSERT(regs.rip == codeStart + 1);
 
     // Run nop.
-    assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+    TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
     regs = vm->getRegisters();
     // Interrupts are still enabled.
-    assert(regs.rflags & (1 << 9));
-    assert(regs.rip == codeStart + 2);
+    TEST_ASSERT(regs.rflags & (1 << 9));
+    TEST_ASSERT(regs.rip == codeStart + 2);
 
     // Run cli.
-    assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+    TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
     regs = vm->getRegisters();
     // Interrupts should be disabled.
-    assert(!(regs.rflags & (1 << 9)));
-    assert(regs.rip == codeStart + 3);
+    TEST_ASSERT(!(regs.rflags & (1 << 9)));
+    TEST_ASSERT(regs.rip == codeStart + 3);
 
     // Run xor rax, rax.
-    assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+    TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
     regs = vm->getRegisters();
     // Interrupts should still be disabled.
-    assert(!(regs.rflags & (1 << 9)));
-    assert(regs.rip == codeStart + 6);
+    TEST_ASSERT(!(regs.rflags & (1 << 9)));
+    TEST_ASSERT(regs.rip == codeStart + 6);
     
-    assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+    TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
 }
 
 // Test running a Vm in real mode, setting the GP registers to specific values
 // and reading the register values at each step using getRegisters().
 // Segment registers and other special registers are not tested here.
-static void testRealMode() {
+DECLARE_TEST(testRealMode) {
     // Set the 16-bits GP one by one and make sure the values reported by
     // Vm::getRegisters() are as expected.
     std::string const assembly(R"(
@@ -136,13 +136,13 @@ static void testRealMode() {
     auto const checkRegs([&](u64 rax, u64 rbx, u64 rcx, u64 rdx,
                              u64 rdi, u64 rsi, u64 rbp, u64 rsp) {
         X86Lab::Vm::State::Registers const regs(vm->getRegisters());
-        assert(regs.rax == rax); assert(regs.rbx == rbx);
-        assert(regs.rcx == rcx); assert(regs.rdx == rdx);
-        assert(regs.rdi == rdi); assert(regs.rsi == rsi);
-        assert(regs.rbp == rbp); assert(regs.rsp == rsp);
-        assert(!regs.r8);  assert(!regs.r9);  assert(!regs.r10);
-        assert(!regs.r11); assert(!regs.r12); assert(!regs.r13);
-        assert(!regs.r14); assert(!regs.r15);
+        TEST_ASSERT(regs.rax == rax); TEST_ASSERT(regs.rbx == rbx);
+        TEST_ASSERT(regs.rcx == rcx); TEST_ASSERT(regs.rdx == rdx);
+        TEST_ASSERT(regs.rdi == rdi); TEST_ASSERT(regs.rsi == rsi);
+        TEST_ASSERT(regs.rbp == rbp); TEST_ASSERT(regs.rsp == rsp);
+        TEST_ASSERT(!regs.r8);  TEST_ASSERT(!regs.r9);  TEST_ASSERT(!regs.r10);
+        TEST_ASSERT(!regs.r11); TEST_ASSERT(!regs.r12); TEST_ASSERT(!regs.r13);
+        TEST_ASSERT(!regs.r14); TEST_ASSERT(!regs.r15);
         // Special registers are not checked.
     });
 
@@ -150,7 +150,7 @@ static void testRealMode() {
     // runnable.
     auto const runNSteps([&](u32 const n) {
         for (u32 i(0); i < n; ++i) {
-            assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+            TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
         }
     });
 
@@ -182,7 +182,7 @@ static void testRealMode() {
 // Test running a Vm in protected mode, setting the GP registers to specific
 // values and reading the register values at each step using getRegisters().
 // Segment registers and other special registers are not tested here.
-static void testProtectedMode() {
+DECLARE_TEST(testProtectedMode) {
     // Set the 32-bits GP one by one and make sure the values reported by
     // Vm::getRegisters() are as expected.
     std::string const assembly(R"(
@@ -223,13 +223,13 @@ static void testProtectedMode() {
     auto const checkRegs([&](u64 rax, u64 rbx, u64 rcx, u64 rdx,
                              u64 rdi, u64 rsi, u64 rbp, u64 rsp) {
         X86Lab::Vm::State::Registers const regs(vm->getRegisters());
-        assert(regs.rax == rax); assert(regs.rbx == rbx);
-        assert(regs.rcx == rcx); assert(regs.rdx == rdx);
-        assert(regs.rdi == rdi); assert(regs.rsi == rsi);
-        assert(regs.rbp == rbp); assert(regs.rsp == rsp);
-        assert(!regs.r8);  assert(!regs.r9);  assert(!regs.r10);
-        assert(!regs.r11); assert(!regs.r12); assert(!regs.r13);
-        assert(!regs.r14); assert(!regs.r15);
+        TEST_ASSERT(regs.rax == rax); TEST_ASSERT(regs.rbx == rbx);
+        TEST_ASSERT(regs.rcx == rcx); TEST_ASSERT(regs.rdx == rdx);
+        TEST_ASSERT(regs.rdi == rdi); TEST_ASSERT(regs.rsi == rsi);
+        TEST_ASSERT(regs.rbp == rbp); TEST_ASSERT(regs.rsp == rsp);
+        TEST_ASSERT(!regs.r8);  TEST_ASSERT(!regs.r9);  TEST_ASSERT(!regs.r10);
+        TEST_ASSERT(!regs.r11); TEST_ASSERT(!regs.r12); TEST_ASSERT(!regs.r13);
+        TEST_ASSERT(!regs.r14); TEST_ASSERT(!regs.r15);
         // Special registers are not checked.
     });
 
@@ -237,7 +237,7 @@ static void testProtectedMode() {
     // runnable.
     auto const runNSteps([&](u32 const n) {
         for (u32 i(0); i < n; ++i) {
-            assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+            TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
         }
     });
 
@@ -269,7 +269,7 @@ static void testProtectedMode() {
 // Test running a Vm in long mode, setting the GP registers to specific values
 // and reading the register values at each step using getRegisters().  Segment
 // registers and other special registers are not tested here.
-static void testLongMode() {
+DECLARE_TEST(testLongMode) {
     // Set the 64-bits GP one by one and make sure the values reported by
     // Vm::getRegisters() are as expected.
     std::string const assembly(R"(
@@ -335,14 +335,14 @@ static void testLongMode() {
                              u64 r8,  u64 r9,  u64 r10, u64 r11,
                              u64 r12, u64 r13, u64 r14, u64 r15) {
         X86Lab::Vm::State::Registers const regs(vm->getRegisters());
-        assert(regs.rax == rax); assert(regs.rbx == rbx);
-        assert(regs.rcx == rcx); assert(regs.rdx == rdx);
-        assert(regs.rdi == rdi); assert(regs.rsi == rsi);
-        assert(regs.rbp == rbp); assert(regs.rsp == rsp);
-        assert(regs.r8 == r8);   assert(regs.r9 == r9);
-        assert(regs.r10 == r10); assert(regs.r11 == r11);
-        assert(regs.r12 == r12); assert(regs.r13 == r13);
-        assert(regs.r14 == r14); assert(regs.r15 == r15);
+        TEST_ASSERT(regs.rax == rax); TEST_ASSERT(regs.rbx == rbx);
+        TEST_ASSERT(regs.rcx == rcx); TEST_ASSERT(regs.rdx == rdx);
+        TEST_ASSERT(regs.rdi == rdi); TEST_ASSERT(regs.rsi == rsi);
+        TEST_ASSERT(regs.rbp == rbp); TEST_ASSERT(regs.rsp == rsp);
+        TEST_ASSERT(regs.r8 == r8);   TEST_ASSERT(regs.r9 == r9);
+        TEST_ASSERT(regs.r10 == r10); TEST_ASSERT(regs.r11 == r11);
+        TEST_ASSERT(regs.r12 == r12); TEST_ASSERT(regs.r13 == r13);
+        TEST_ASSERT(regs.r14 == r14); TEST_ASSERT(regs.r15 == r15);
         // Special registers are not checked.
     });
 
@@ -350,7 +350,7 @@ static void testLongMode() {
     // runnable.
     auto const runNSteps([&](u32 const n) {
         for (u32 i(0); i < n; ++i) {
-            assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+            TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
         }
     });
 
@@ -396,7 +396,7 @@ static void testLongMode() {
 }
 
 // Test that getRegisters() returns the correct values for segment registers.
-static void testReadSegmentRegisters() {
+DECLARE_TEST(testReadSegmentRegisters) {
     // Use a VM running in RealMode so that we can set the segment registers to
     // arbitrary values without having to build a GDT first.
     std::string const assembly(R"(
@@ -432,27 +432,27 @@ static void testReadSegmentRegisters() {
     // runnable.
     auto const runNSteps([&](u32 const n) {
         for (u32 i(0); i < n; ++i) {
-            assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+            TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
         }
     });
 
     // Run first instruction, this sets CS to 0x1.
     runNSteps(1);
-    assert(vm->getRegisters().cs == 0x1);
+    TEST_ASSERT(vm->getRegisters().cs == 0x1);
     runNSteps(2);
-    assert(vm->getRegisters().ds == 0xDDDD);
+    TEST_ASSERT(vm->getRegisters().ds == 0xDDDD);
     runNSteps(2);
-    assert(vm->getRegisters().es == 0xEEEE);
+    TEST_ASSERT(vm->getRegisters().es == 0xEEEE);
     runNSteps(2);
-    assert(vm->getRegisters().fs == 0xFFFF);
+    TEST_ASSERT(vm->getRegisters().fs == 0xFFFF);
     runNSteps(2);
-    assert(vm->getRegisters().gs == 0x1111);
+    TEST_ASSERT(vm->getRegisters().gs == 0x1111);
     runNSteps(2);
-    assert(vm->getRegisters().ss == 0x2222);
+    TEST_ASSERT(vm->getRegisters().ss == 0x2222);
 }
 
 // Check that getRegisters returns the correct values for GDTR and IDTR.
-static void testReadGdtIdt() {
+DECLARE_TEST(testReadGdtIdt) {
     // We actually can set the GDTR and IDTR to arbitrary values, as long as we
     // are not reloading the segment registers.
     // The GDT and IDT limits are supposed to be for the form 8*N - 1 per x86-64
@@ -483,19 +483,19 @@ static void testReadGdtIdt() {
         createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly));
 
     // Run the lgdt and lidt instructions.
-    assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
-    assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+    TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+    TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
 
     // Check the reported values.
     X86Lab::Vm::State::Registers const regs(vm->getRegisters());
-    assert(regs.gdt.base == 0xFFFFFFF8CAFEBABE);
-    assert(regs.gdt.limit == 0x8887);
-    assert(regs.idt.base == 0xFFFFFFF8ABCDEF12);
-    assert(regs.idt.limit == 0xABC7);
+    TEST_ASSERT(regs.gdt.base == 0xFFFFFFF8CAFEBABE);
+    TEST_ASSERT(regs.gdt.limit == 0x8887);
+    TEST_ASSERT(regs.idt.base == 0xFFFFFFF8ABCDEF12);
+    TEST_ASSERT(regs.idt.limit == 0xABC7);
 }
 
 // Check that getRegisters() reads the correct values of all control registers.
-static void testReadControlRegisters() {
+DECLARE_TEST(testReadControlRegisters) {
     // Modify the control register as best as we can. More specifically:
     //  - Toggle the Cache Disable (CD, bit 30) and Not Write-through (NW, bit
     //  29) bits in CR0. Toggle both of them is always a valid configuration
@@ -543,7 +543,7 @@ static void testReadControlRegisters() {
 
     auto const runNSteps([&](u32 const n) {
         for (u32 i(0); i < n; ++i) {
-            assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+            TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
         }
     });
     // Execute all 19 instructions (not the hlt).
@@ -551,12 +551,12 @@ static void testReadControlRegisters() {
 
     // Check the new values of the control regs.
     X86Lab::Vm::State::Registers const regs(vm->getRegisters());
-    assert(regs.cr0 == (prev.cr0 ^ ((1 << 30) | (1 << 29))));
-    assert(regs.cr2 == 0xDEADBEEFCAFEBABE);
-    assert(regs.cr3 == (prev.cr3 ^ (1 << 3)));
-    assert(regs.cr4 == (prev.cr4 ^ (1 << 2)));
-    assert(regs.cr8 == (prev.cr8 ^ 0xF));
-    assert(regs.efer == (prev.efer ^ (1 << 11)));
+    TEST_ASSERT(regs.cr0 == (prev.cr0 ^ ((1 << 30) | (1 << 29))));
+    TEST_ASSERT(regs.cr2 == 0xDEADBEEFCAFEBABE);
+    TEST_ASSERT(regs.cr3 == (prev.cr3 ^ (1 << 3)));
+    TEST_ASSERT(regs.cr4 == (prev.cr4 ^ (1 << 2)));
+    TEST_ASSERT(regs.cr8 == (prev.cr8 ^ 0xF));
+    TEST_ASSERT(regs.efer == (prev.efer ^ (1 << 11)));
 }
 
 // Check that Vm::setRegisters() actually set the registers to their correct
@@ -565,7 +565,7 @@ static void testReadControlRegisters() {
 // not yet fully specified (FIXME).
 // This test assumes that Vm::getRegisters() works as intended an returns the
 // correct value of all registers (getRegisters is tested above).
-static void testSetRegisters() {
+DECLARE_TEST(testSetRegisters) {
     // A single instruction that 
     std::string const assembly(R"(
         BITS 64
@@ -623,7 +623,7 @@ static void testSetRegisters() {
     vm->setRegisters(expected);
 
     // Run the single nop instruction.
-    assert(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+    TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
 
     X86Lab::Vm::State::Registers current(vm->getRegisters());
     // The NOP instruction does not change RFLAGS. However it incremented RIP by
@@ -640,12 +640,12 @@ static void testSetRegisters() {
     
     // The registers should have the values with explicitely set with
     // setRegisters.
-    assert(current == expected);
+    TEST_ASSERT(current == expected);
 }
 
 // Test that values of segment registers are ignored when calling setRegisters,
 // as writing those is not supported.
-static void testSetRegistersSegmentRegisters() {
+DECLARE_TEST(testSetRegistersSegmentRegisters) {
     // We are not actually running the VM in this test, merely setting the
     // registers.
     std::string const assembly(R"(
@@ -670,24 +670,11 @@ static void testSetRegistersSegmentRegisters() {
     // Re-read the registers and make sure that the segment registers did not
     // change.
     X86Lab::Vm::State::Registers const currRegs(vm->getRegisters());
-    assert(currRegs.cs == origRegs.cs);
-    assert(currRegs.ds == origRegs.ds);
-    assert(currRegs.es == origRegs.es);
-    assert(currRegs.fs == origRegs.fs);
-    assert(currRegs.gs == origRegs.gs);
-    assert(currRegs.ss == origRegs.ss);
-}
-
-// Run all the tests under this namespace.
-void run() {
-    testReadRipAndRflags();
-    testRealMode();
-    testProtectedMode();
-    testLongMode();
-    testReadSegmentRegisters();
-    testReadGdtIdt();
-    testReadControlRegisters();
-    testSetRegisters();
-    testSetRegistersSegmentRegisters();
+    TEST_ASSERT(currRegs.cs == origRegs.cs);
+    TEST_ASSERT(currRegs.ds == origRegs.ds);
+    TEST_ASSERT(currRegs.es == origRegs.es);
+    TEST_ASSERT(currRegs.fs == origRegs.fs);
+    TEST_ASSERT(currRegs.gs == origRegs.gs);
+    TEST_ASSERT(currRegs.ss == origRegs.ss);
 }
 }

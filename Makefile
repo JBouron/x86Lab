@@ -28,6 +28,7 @@ x86lab: main.o $(OBJ_FILES)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
 
 # Tests.
+test: CXXFLAGS += -Itests/include/
 test: x86labTests
 	./x86labTests
 
