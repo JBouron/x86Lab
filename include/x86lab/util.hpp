@@ -99,5 +99,11 @@ kvm_sregs getSRegs(int const vcpuFd);
 // @param regs: The kvm_sregs to write.
 // @throws: A KvmError in case of error.
 void setSRegs(int const vcpuFd, kvm_sregs const& regs);
+
+// Get the maximum number of memory slots supported by the vm.
+// @param vmFd: The file descriptor for the vm.
+// @return: The maximum number of memory slots supported by vmFd.
+// @throws: A KvmError in case of error.
+u16 getMaxMemSlots(int const vmFd);
 }
 }

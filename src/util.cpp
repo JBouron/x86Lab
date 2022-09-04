@@ -109,4 +109,11 @@ void setSRegs(int const vcpuFd, kvm_sregs const& regs) {
     }
 }
 
+u16 getMaxMemSlots(int const vmFd) {
+    int const max(::ioctl(vmFd, KVM_CHECK_EXTENSION, KVM_CAP_NR_MEMSLOTS, 0));
+    if (max == -1) {
+        throw KvmError("Error while calling KVM_CAP_NR_MEMSLOTS: ", errno);
+    }
+    return max;
+}
 }

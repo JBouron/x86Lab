@@ -50,6 +50,7 @@ DECLARE_TEST(testReadRipAndRflags) {
         nop
         cli
         xor     rax, rax
+        hlt
     )");
 
     std::unique_ptr<X86Lab::Vm> const vm(

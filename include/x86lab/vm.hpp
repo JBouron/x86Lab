@@ -2,6 +2,7 @@
 #include <iostream>
 #include <memory>
 #include <x86lab/util.hpp>
+#include <vector>
 
 namespace X86Lab {
 
@@ -190,13 +191,16 @@ private:
     // the page tables to have identity mapping.
     void enableCpuMode(kvm_sregs& sregs, CpuMode const mode);
 
-    // Add more physical memory to the guest.
-    // @param offset: The offset at which the memory should be added.
+    // Add more physical memory to the guest. The added memory starts at the end
+    // of the current physical memory.
     // @param size: The amount of memory to add to the guest in bytes. Must be a
     // multiple of PAGE_SIZE.
+    // @param isReadOnly: Indicate if this memory should be read-only for the
+    // guest VM. The user-space (e.g. this program) always have write permission
+    // on the allocated memory regardless of the value of isReadOnly.
     // @return: The userspace address of the allocated memory.
     // @throws: KvmError or MmapError in case of kvm ioctl error or mmap error.
-    void *addPhysicalMemory(u64 const offset, size_t const size);
+    void *addPhysicalMemory(size_t const size, bool const isReadOnly);
 
     // File descriptor for the KVM.
     int const vmFd;
@@ -206,11 +210,10 @@ private:
     // only read the kvm_run structure to get information on the exit reason,
     // hence use const reference.
     kvm_run const& kvmRun;
-    // The number of memory slots used. This corrolates with the number of times
-    // addPhysicalMemory has been called.
-    u32 usedMemorySlots;
     // The size of the guest's physical memory in bytes.
     size_t physicalMemorySize;
+    // Description of all the memory slots of this VM.
+    std::vector<kvm_userspace_memory_region> memorySlots;
     // Pointer to start of physical memory on the host (e.g. userspace).
     void *memory;
     // The current OperatingState of the KVM.

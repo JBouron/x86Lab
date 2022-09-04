@@ -35,9 +35,8 @@ Vm::Vm(CpuMode const startMode, u64 const memorySize) :
     vmFd(Util::Kvm::createVm()),
     vcpuFd(Util::Kvm::createVcpu(vmFd)),
     kvmRun(Util::Kvm::getVcpuRunStruct(vcpuFd)),
-    usedMemorySlots(0),
     physicalMemorySize(memorySize * PAGE_SIZE),
-    memory(addPhysicalMemory(0x0, physicalMemorySize)),
+    memory(addPhysicalMemory(physicalMemorySize, false)),
     currState(OperatingState::NoCodeLoaded)
     {
     // Disable any MSR access filtering. KVM's doc indicate that if this is not
@@ -360,8 +359,8 @@ void Vm::enableCpuMode(kvm_sregs& sregs, CpuMode const mode) {
         assert(!(pml4Offset % PAGE_SIZE));
 
         // Userspace addresses for the PML4 and PDPT.
-        void * const pml4Addr(addPhysicalMemory(pml4Offset, PAGE_SIZE));
-        void * const pdptAddr(addPhysicalMemory(pdptOffset, PAGE_SIZE));
+        void * const pml4Addr(addPhysicalMemory(PAGE_SIZE, true));
+        void * const pdptAddr(addPhysicalMemory(PAGE_SIZE, true));
 
         // FIXME: As of now we only R/W Identity-Map the first 1GiB. Because we
         // are lazy we use huge 1GiB pages. Everything is in supervisor mode.
@@ -392,8 +391,14 @@ void Vm::enableCpuMode(kvm_sregs& sregs, CpuMode const mode) {
     }
 }
 
-void* Vm::addPhysicalMemory(u64 const offset, size_t const size) {
+void* Vm::addPhysicalMemory(size_t const size, bool const isReadOnly) {
     assert(!(size % PAGE_SIZE));
+
+    if (memorySlots.size() == Util::Kvm::getMaxMemSlots(vmFd)) {
+        // We are already using as many slots as we can. Note this will most
+        // likely never happen as KVM reports 32k slots on most machines.
+        throw KvmError("Reached max. number of memory slots on VM", 0);
+    }
 
     // Mmap some anonymous memory for the requested size.
     int const prot(PROT_READ | PROT_WRITE);
@@ -403,18 +408,27 @@ void* Vm::addPhysicalMemory(u64 const offset, size_t const size) {
         throw MmapError("Failed to mmap memory for guest", errno);
     }
 
+    u32 const numSlots(memorySlots.size());
+    kvm_userspace_memory_region const lastSlot(
+        (!!numSlots) ? memorySlots[numSlots-1] : kvm_userspace_memory_region{});
+
+    // The physical address of the new slot starts immediately after the last
+    // slot.
+    u64 const phyAddr(lastSlot.guest_phys_addr + lastSlot.memory_size);
+
     // Then map the memory to the guest.
     kvm_userspace_memory_region const kvmMap({
-        .slot = usedMemorySlots,
-        .flags = 0,
-        .guest_phys_addr = offset,
+        .slot = static_cast<u32>(memorySlots.size()),
+        .flags = static_cast<u32>(isReadOnly ? KVM_MEM_READONLY : 0),
+        .guest_phys_addr = phyAddr,
         .memory_size = size,
         .userspace_addr = reinterpret_cast<u64>(userspace),
     });
     if (::ioctl(vmFd, KVM_SET_USER_MEMORY_REGION, &kvmMap) == -1) {
         throw KvmError("Failed to map memory to guest", errno);
     }
-    usedMemorySlots++;
+    // Adding the slot was successful, add it to the vector.
+    memorySlots.push_back(kvmMap);
     return userspace;
 }
 }
