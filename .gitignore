@@ -1,5 +1,5 @@
 .deps
-x86lab
-x86labTests
+/x86lab
+/x86labTests
 *.o
 TODO.txt

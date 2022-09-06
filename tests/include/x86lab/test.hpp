@@ -13,20 +13,20 @@ public:
     AssertFailure(std::string const& errMessage);
 };
 
+// Internal, use TEST_ASSERT macro instead.
+void _assert(bool const success,
+             std::string const& condition,
+             std::string const& funcName,
+             std::string const& fileName,
+             u64 const line);
+
 // Assert a condition, throws an AssertFailure if the condition is not met.
 #define TEST_ASSERT(condition) \
-    do { \
-        extern void X86Lab::Test::_assert(bool const, \
-                     std::string const&, \
-                     std::string const&, \
-                     std::string const&, \
-                     u64 const); \
-        X86Lab::Test::_assert((condition), \
-                #condition, \
-                __func__, \
-                __FILE__, \
-                __LINE__); \
-    } while(0)
+    _assert((condition), \
+            #condition, \
+            __func__, \
+            __FILE__, \
+            __LINE__);
 
 // Type for a test, which is no more than a pointer to a void ...(void)
 // function.
