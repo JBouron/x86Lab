@@ -11,7 +11,11 @@ Snapshot::Snapshot(std::unique_ptr<Vm::State> state) :
 Snapshot::Snapshot(std::shared_ptr<Snapshot> const base,
                    std::unique_ptr<Vm::State> state) :
     baseSnapshot(base),
-    vmState(std::move(state)) {}
+    regs(state->registers()),
+    memSize(state->memory().size),
+    mem(new u8[memSize]) {
+    std::memcpy(mem.get(), state->memory().data.get(), memSize);
+}
 
 std::shared_ptr<Snapshot> Snapshot::base() const {
     return baseSnapshot;
@@ -22,17 +26,16 @@ bool Snapshot::hasBase() const {
 }
 
 Snapshot::Registers const& Snapshot::registers() const {
-    return vmState->registers();
+    return regs;
 }
 
 std::unique_ptr<u8> Snapshot::readPhysicalMemory(u64 const offset,
                                                  u64 const size) const {
     std::unique_ptr<u8> buf(new u8[size]);
     std::memset(buf.get(), 0, size);
-    Vm::State::Memory const& mem(vmState->memory());
-    if (offset <= mem.size) {
-        u64 const toRead(std::min(size, vmState->memory().size - offset));
-        std::memcpy(buf.get(), vmState->memory().data.get() + offset, toRead);
+    if (offset <= memSize) {
+        u64 const toRead(std::min(size, memSize - offset));
+        std::memcpy(buf.get(), mem.get() + offset, toRead);
     }
     return buf;
 }

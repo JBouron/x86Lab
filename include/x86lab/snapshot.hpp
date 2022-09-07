@@ -48,7 +48,13 @@ public:
                                            u64 const size) const;
 
 private:
+    // The snapshot this snapshot is built on top of.
     std::shared_ptr<Snapshot> baseSnapshot;
-    std::unique_ptr<Vm::State> vmState;
+    // The value of all the register at that snapshot.
+    Vm::State::Registers regs;
+    // The size of the physical memory.
+    u64 memSize;
+    // A complete copy of the physical memory.
+    std::unique_ptr<u8[]> mem;
 };
 }
