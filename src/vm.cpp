@@ -502,6 +502,9 @@ std::pair<void*, u64> Vm::addPhysicalMemory(u32 const numPages) {
         throw MmapError("Failed to mmap memory for guest", errno);
     }
 
+    // Zero the allocated memory area.
+    std::memset(userspace, 0x0, allocSize);
+
     u32 const numSlots(memorySlots.size());
     kvm_userspace_memory_region const lastSlot(
         (!!numSlots) ? memorySlots[numSlots-1] : kvm_userspace_memory_region{});

@@ -725,4 +725,80 @@ DECLARE_TEST(test64BitIdentityMapping) {
         TEST_ASSERT(read == regs.rcx);
     }
 }
+
+DECLARE_TEST(testReadMemory) {
+    // Basic code that will be repeated to fill memory with a pattern this code
+    // is 4 bytes long.
+    std::string const assembly(R"(
+        BITS 64
+        rep     stosw
+        hlt
+    )");
+    u64 const codeSize(4);
+
+    u64 const memSize(128);
+    std::unique_ptr<X86Lab::Vm> const vm(
+        createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly, memSize));
+
+    // The number of WORDs to write, hence the entire memory, minus the code,
+    // divided by the number of bytes per WORD (2). This is guaranteed to be
+    // divisible by 2.
+    u64 const numWordsToFill((memSize * PAGE_SIZE - codeSize) / 2);
+
+    // Run the VM until the rep stosw has been fully executed. This is needed
+    // because rep'ed instructions do not inhibit interrupts.
+    auto const run([&]() {
+        // Run until we reach the address of the hlt instruction. Note that in
+        // case of rep'ed instruction, RIP points to the rep'ed instruction when
+        // interrupted, not the next instruction.
+        while(vm->getRegisters().rip != codeSize - 1) {
+            TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+        }
+    });
+
+    auto const checkMem([&](u16 const fillVal) {
+        std::unique_ptr<X86Lab::Vm::State> const firstPass(vm->getState());
+        u16 const * const raw(
+            reinterpret_cast<u16 const*>(firstPass->memory().data.get()));
+
+        // The first 4 bytes are f3 66 ab f4, aka what the code above assembles
+        // to.
+        u16 const firstWord(0x66f3);
+        u16 const secondWord(0xf4ab);
+
+        TEST_ASSERT(raw[0] == firstWord);
+        TEST_ASSERT(raw[1] == secondWord);
+
+        for (u64 i(0); i < numWordsToFill; ++i) {
+            TEST_ASSERT(raw[2 + i] == fillVal);
+        }
+    });
+
+	// When the VM is created, the physical memory should have been zero'ed.
+	checkMem(0x0);
+
+    // First fill: 0x00EF.
+    X86Lab::Vm::State::Registers regs(vm->getRegisters());
+    regs.rip = 0x0;
+    regs.rax = 0x00EF;
+    // RCX is the number of time to repeat the stosw, hence the number of word
+    // to write.
+    regs.rcx = numWordsToFill;
+    // Start writing after the code.
+    regs.rdi = codeSize;
+
+	vm->setRegisters(regs);
+    run();
+    checkMem(regs.rax);
+
+	// Second fill: 0xBE00.
+    regs.rip = 0x0;
+    regs.rax = 0xBE00;
+    regs.rcx = numWordsToFill;
+    regs.rdi = codeSize;
+
+	vm->setRegisters(regs);
+    run();
+    checkMem(regs.rax);
+}
 }

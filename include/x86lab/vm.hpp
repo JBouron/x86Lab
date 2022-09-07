@@ -120,7 +120,11 @@ public:
     // Creates a KVM with the given amount of memory.
     // @param startMode: The mode in which to start the Vm in.
     // @param memorySize: The amount of physical memory in multiple of PAGE_SIZE
-    // to allocate for the VM.
+    // to allocate for the VM. Note: In case the Vm is started in LongMode, more
+    // physical memory is allocated than requested to hold the page table
+    // structure. This extra memory is NOT reported when calling getState(). The
+    // rationale here is that in most cases the user is not interested in seeing
+    // the page tables.
     // @throws: A KvmError is thrown in case of any error related to the KVM
     // initialization.
     // @throws: A MmapError is thrown in case of any error related to
