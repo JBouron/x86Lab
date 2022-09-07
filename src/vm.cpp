@@ -1,4 +1,6 @@
 #include <x86lab/vm.hpp>
+#include <functional>
+#include <map>
 
 namespace X86Lab {
 
@@ -36,7 +38,7 @@ Vm::Vm(CpuMode const startMode, u64 const memorySize) :
     vcpuFd(Util::Kvm::createVcpu(vmFd)),
     kvmRun(Util::Kvm::getVcpuRunStruct(vcpuFd)),
     physicalMemorySize(memorySize * PAGE_SIZE),
-    memory(addPhysicalMemory(memorySize, false)),
+    memory(std::get<0>(addPhysicalMemory(memorySize, false))),
     currState(OperatingState::NoCodeLoaded)
     {
     // Disable any MSR access filtering. KVM's doc indicate that if this is not
@@ -349,37 +351,16 @@ void Vm::enableCpuMode(kvm_sregs& sregs, CpuMode const mode) {
         // registers as well as the EFER MSR and setup paging as this is
         // required in 64-bit.
 
-        // Setup paging. We can allocate the pages used for the PML4 and PDPT
-        // after the requested memory.
-
-        // These are guaranteed to be page aligned since the physical memory
-        // size is a multiple of page size.
-        u64 const pml4Offset(physicalMemorySize);
-        u64 const pdptOffset(pml4Offset + PAGE_SIZE);
-        assert(!(pml4Offset % PAGE_SIZE));
-
-        // Userspace addresses for the PML4 and PDPT.
-        void * const pml4Addr(addPhysicalMemory(1, true));
-        void * const pdptAddr(addPhysicalMemory(1, true));
-
-        // FIXME: As of now we only R/W Identity-Map the first 1GiB. Because we
-        // are lazy we use huge 1GiB pages. Everything is in supervisor mode.
-        // Entry 0: Pointing to the allocated PDPT with R/W permission.
-        *reinterpret_cast<u64*>(pml4Addr) =
-            (pdptOffset & 0xFFFFFFFFFFFFF000ULL) | 3;
-        // Entry 0: Pointing to 1GiB frame starting at offset 0, R/W
-        // permissions.
-        // Bit 7 indicates that this is a 1GiB page.
-        *reinterpret_cast<u64*>(pdptAddr) = (1 << 7) | 3;
+        // Setup paging.
+        // Load PML4 into CR3.
+        u64 const pml4Offset(createIdentityMapping());
+        sregs.cr3 = pml4Offset & 0xFFFFFFFFFFFFF000ULL;
 
         // Page table is ready now setup the control registers as they would be
         // in long mode.
         // Enable Physical Address Extension (PAE) in Cr4 (bit 5) , mandatory
         // for 64-bits.
         sregs.cr4 |= (1 << 5);
-
-        // Load PML4 into CR3.
-        sregs.cr3 = pml4Offset & 0xFFFFFFFFFFFFF000ULL;
 
         // Set LME (bit 8) and LMA (bit 10) bits in EFER.
         sregs.efer |= ((1 << 8) | (1 << 10));
@@ -391,7 +372,119 @@ void Vm::enableCpuMode(kvm_sregs& sregs, CpuMode const mode) {
     }
 }
 
-void* Vm::addPhysicalMemory(u32 const numPages, bool const isReadOnly) {
+u64 Vm::createIdentityMapping() {
+    // Since we are mapping from the host's user space, we need to keep track of
+    // two addresses per table in the page table structure:
+    //  - The host address, that is where the table has been mmap'ed on the
+    //  host. This is the address we use to write into the table from the host.
+    //  - The guest physical address, this is the physical address at which the
+    //  table reside on the guest and the address that we need to write into
+    //  page table entries.
+    // This maps a guest physical offset of a table to the host mmap address
+    // used to write into that table.
+    std::map<u64, u64*> guestToHost;
+
+    // Compute the index of the table entry mapping the physical address at a
+    // certain level.
+    // This is an helper function for map() below.
+    auto const getIndexAtLevel([&](u64 const pAddr, u8 const level) {
+        // 64-bit linear addresses are mapped as follows:
+        //  47        39 38         30 29         21 20         12 11         0
+        // |PML4        |Directory Ptr|Directory    |Table        |Offset     |
+        u64 const shift(12 + (level - 1) * 9);
+        assert(shift <= 39);
+        u64 const mask(0x1FF);
+        return (pAddr >> shift) & mask;
+    });
+
+    // Check if a page table entry is marked as present.
+    // This is an helper function for map() below.
+    auto const isPresent([&](u64 const entry) {
+        return entry & 0x1;
+    });
+
+    // Compute a table entry to point to the next level's offset.
+    // This is an helper function for map() below.
+    auto const computeEntry([&](u64 const nextLevelOffset) {
+        // Set present bit, and write permission.
+        return (nextLevelOffset & 0xFFFFFFFFFFFFF000ULL) | 0x3;
+    });
+
+    // Helper lambda to ID map a physical frame on the guest. This function will
+    // recurse into lower level table to map the frame.
+    // @param pAddr: The physical address to map, must be PAGE_SIZE aligned.
+    // @param table: The host-address of the current table to be modified to
+    // contain the mapping.
+    // @param level: The level of `table`.
+    std::function<void(u64, u64*, u8)> map(
+        [&](u64 const pAddr, u64 * const table, u8 const level) {
+        assert(!(pAddr % PAGE_SIZE));
+        if (!level) {
+            // We reached the last level, nothing to do.
+            return;
+        }
+
+        u64 const index(getIndexAtLevel(pAddr, level));
+        if (level == 1) {
+            // Reached last level, map the frame.
+            table[index] = computeEntry(pAddr);
+        } else {
+            u64 const currEntry(table[index]);
+            if (!isPresent(currEntry)) {
+                // The entry is marked non-present, e.g. there is no table in
+                // the lower-level. Allocate the next table, map it to the
+                // current table, then recurse into it.
+                std::pair<void*, u64> const alloc(addPhysicalMemory(1, false));
+                // The offset of the allocated table in the guest's physical
+                // memory. This is the offset that we need to write in the
+                // current table's entry.
+                u64 const guestOffset(std::get<1>(alloc));
+                assert(!(guestOffset % PAGE_SIZE));
+                // The address at which the table is mapped to the host's user
+                // memory. This is the address that we need to pass to the
+                // recursive call to map() so we can read and write the table
+                // from the host.
+                u64 * const host(reinterpret_cast<u64*>(std::get<0>(alloc)));
+                // Add the mapping guestOffset -> host so that future calls to
+                // map() know how to read/write the allocated table.
+                guestToHost[guestOffset] = host;
+                // Update the current entry to point to the new table.
+                table[index] = computeEntry(guestOffset);
+                // Continue the mapping into the lower level.
+                map(pAddr, host, level - 1);
+            } else {
+                // The entry is present, there is already a table at level - 1,
+                // continue the mapping into the lower level.
+                u64 const guestOffset(currEntry & 0xFFFFFFFFFFFFF000ULL);
+                // The level-1 table must have been added to the map when
+                // allocated. If the key is not present in the map then we have
+                // no way to know at which address we should read/write from/to
+                // on the host to manipulate it.
+                assert(guestToHost.contains(guestOffset));
+                map(pAddr, guestToHost[guestOffset], level - 1);
+            }
+        }
+    });
+
+    // Allocate a PML4, the root of the page table structure.
+    // Note: We cannot allocate the page tables as read-only memory because the
+    // vcpu writes the dirty and accessed bits in the page table entries.
+    std::pair<void*, u64> const pml4Alloc(addPhysicalMemory(1, false));
+    // Host-side address of the PML4.
+    u64 * const hostPml4(reinterpret_cast<u64*>(std::get<0>(pml4Alloc)));
+    // Guest-side offset of the PML4.
+    u64 const guestPml4(std::get<1>(pml4Alloc));
+    assert(!(guestPml4 % PAGE_SIZE));
+
+    // Map each physical frame.
+    for (u64 offset(0); offset < physicalMemorySize; offset += PAGE_SIZE) {
+        map(offset, hostPml4, 4);
+    }
+    return guestPml4;
+}
+
+std::pair<void*, u64> Vm::addPhysicalMemory(u32 const numPages,
+                                            bool const isReadOnly) {
     if (memorySlots.size() == Util::Kvm::getMaxMemSlots(vmFd)) {
         // We are already using as many slots as we can. Note this will most
         // likely never happen as KVM reports 32k slots on most machines.
@@ -429,6 +522,6 @@ void* Vm::addPhysicalMemory(u32 const numPages, bool const isReadOnly) {
     }
     // Adding the slot was successful, add it to the vector.
     memorySlots.push_back(kvmMap);
-    return userspace;
+    return std::pair<void*, u64>(userspace, phyAddr);
 }
 }

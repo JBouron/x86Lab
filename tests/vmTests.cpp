@@ -25,15 +25,16 @@ namespace X86Lab::Test::Vm {
 // Helper function to create a VM and load the given code to memory.
 // @param startMode: The cpu mode the VM should start in.
 // @param assembly: The assembly code to assemble and load into the Vm.
+// @param memorySizePages: The size of the physical memory in number of pages.
 // @return: A unique_ptr for the instantiated VM.
 static std::unique_ptr<X86Lab::Vm> createVmAndLoadCode(
     X86Lab::Vm::CpuMode const startMode,
-    std::string const& assembly) {
+    std::string const& assembly,
+    u64 const memorySizePages = 1) {
 
     std::string const fileName(writeCode(assembly));
     std::shared_ptr<Assembler::Code> const code(Assembler::assemble(fileName));
-    u64 const memorySize(1);
-    std::unique_ptr<X86Lab::Vm> vm(new X86Lab::Vm(startMode, memorySize));
+    std::unique_ptr<X86Lab::Vm> vm(new X86Lab::Vm(startMode, memorySizePages));
     vm->loadCode(code->machineCode(), code->size());
     return vm;
 }
@@ -50,6 +51,7 @@ DECLARE_TEST(testReadRipAndRflags) {
         nop
         cli
         xor     rax, rax
+		nop
         hlt
     )");
 
@@ -677,5 +679,47 @@ DECLARE_TEST(testSetRegistersSegmentRegisters) {
     TEST_ASSERT(currRegs.fs == origRegs.fs);
     TEST_ASSERT(currRegs.gs == origRegs.gs);
     TEST_ASSERT(currRegs.ss == origRegs.ss);
+}
+
+// Test ensuring that 64-bits VMs are started with their entire physical memory
+// being identity mapped.
+DECLARE_TEST(test64BitIdentityMapping) {
+    // The goal here is to test the mapping by writing a special value at the
+    // beginning of each page in virtual memory, and then check that the value
+    // is read back when reading the guest's physical memory.
+    // Simple code writting RCX into the pointer RAX. Instead of using a loop,
+    // we will manually set the value of rip to execute it as much as we want
+    // while keeping the memory footprint the same.
+    std::string const assembly(R"(
+        BITS 64
+        dq 0x0
+        ; Next instruction starts at offset 0x8.
+        mov     [rax], rcx
+        nop
+        hlt
+    )");
+    // 1024 pages = 4MiB of memory. This should be enough to test the identity
+    // mapping.
+    u64 const memSize(1024);
+    std::unique_ptr<X86Lab::Vm> const vm(
+        createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly, memSize));
+
+    for (u64 i(0); i < memSize; ++i) {
+        u64 const writeOffset(i * X86Lab::PAGE_SIZE);
+        // Reset the registers to point to the mov instruction with the correct
+        // address in RAX.
+        X86Lab::Vm::State::Registers regs(vm->getRegisters());
+        regs.rip = 0x8;
+        regs.rcx = 0xDEADBEEFCAFEBABEULL;
+        regs.rax = writeOffset;
+        vm->setRegisters(regs);
+
+        // Run the mov.
+        TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+
+        std::unique_ptr<X86Lab::Vm::State> const state(vm->getState());
+        u64 const read(*(reinterpret_cast<u64*>(state->memory().data.get() + writeOffset)));
+        TEST_ASSERT(read == regs.rcx);
+    }
 }
 }

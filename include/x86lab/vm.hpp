@@ -3,6 +3,7 @@
 #include <memory>
 #include <x86lab/util.hpp>
 #include <vector>
+#include <utility>
 
 namespace X86Lab {
 
@@ -191,15 +192,24 @@ private:
     // the page tables to have identity mapping.
     void enableCpuMode(kvm_sregs& sregs, CpuMode const mode);
 
+    // Only used when the VM is started in Long Mode, this setup the page table
+    // structure to identity map the entire physical memory in virtual memory.
+    // @return: The guest's physical offset of the PML4 table, to be loaded in
+    // CR3.
+    u64 createIdentityMapping();
+
     // Add more physical memory to the guest. The added memory starts at the end
     // of the current physical memory.
     // @param numPages: The number of physical pages frames to allocate.
     // @param isReadOnly: Indicate if this memory should be read-only for the
     // guest VM. The user-space (e.g. this program) always have write permission
     // on the allocated memory regardless of the value of isReadOnly.
-    // @return: The userspace address of the allocated memory.
+    // @return: A pair in which the first value is the host-address at which the
+    // new memory was mmap'ed, and the second is the guest-physical-address at
+    // which the allocated memory starts.
     // @throws: KvmError or MmapError in case of kvm ioctl error or mmap error.
-    void *addPhysicalMemory(u32 const numPages, bool const isReadOnly);
+    std::pair<void*, u64> addPhysicalMemory(u32 const numPages,
+                                            bool const isReadOnly);
 
     // File descriptor for the KVM.
     int const vmFd;
