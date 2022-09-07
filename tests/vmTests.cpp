@@ -132,6 +132,7 @@ DECLARE_TEST(testRealMode) {
 
     std::unique_ptr<X86Lab::Vm> const vm(
         createVmAndLoadCode(X86Lab::Vm::CpuMode::RealMode, assembly));
+    u16 const defaultSp(X86Lab::PAGE_SIZE);
 
     // Check the values of the general purpose registers (r8-r15 are ignored
     // since we are running in 16 bits, those are expected to be zero).
@@ -158,26 +159,26 @@ DECLARE_TEST(testRealMode) {
     });
 
     // Initially all registers are expected to be zeroed.
-    checkRegs(0, 0, 0, 0, 0, 0, 0, 0);
+    checkRegs(0, 0, 0, 0, 0, 0, 0, defaultSp);
 
     // Run the first instruction setting ax.
     runNSteps(1);
 
     // The expected value.
     u64 const val(0xABCD);
-    checkRegs(val, 0, 0, 0, 0, 0, 0, 0);
+    checkRegs(val, 0, 0, 0, 0, 0, 0, defaultSp);
     runNSteps(2);
-    checkRegs(0, val, 0, 0, 0, 0, 0, 0);
+    checkRegs(0, val, 0, 0, 0, 0, 0, defaultSp);
     runNSteps(2);
-    checkRegs(0, 0, val, 0, 0, 0, 0, 0);
+    checkRegs(0, 0, val, 0, 0, 0, 0, defaultSp);
     runNSteps(2);
-    checkRegs(0, 0, 0, val, 0, 0, 0, 0);
+    checkRegs(0, 0, 0, val, 0, 0, 0, defaultSp);
     runNSteps(2);
-    checkRegs(0, 0, 0, 0, val, 0, 0, 0);
+    checkRegs(0, 0, 0, 0, val, 0, 0, defaultSp);
     runNSteps(2);
-    checkRegs(0, 0, 0, 0, 0, val, 0, 0);
+    checkRegs(0, 0, 0, 0, 0, val, 0, defaultSp);
     runNSteps(2);
-    checkRegs(0, 0, 0, 0, 0, 0, val, 0);
+    checkRegs(0, 0, 0, 0, 0, 0, val, defaultSp);
     runNSteps(2);
     checkRegs(0, 0, 0, 0, 0, 0, 0, val);
 }
@@ -219,6 +220,7 @@ DECLARE_TEST(testProtectedMode) {
     )");
     std::unique_ptr<X86Lab::Vm> const vm(
         createVmAndLoadCode(X86Lab::Vm::CpuMode::ProtectedMode, assembly));
+    u32 const defaultEsp(X86Lab::PAGE_SIZE);
 
     // Check the values of the general purpose registers (r8-r15 are ignored
     // since we are running in 32 bits, those are expected to be zero).
@@ -245,26 +247,26 @@ DECLARE_TEST(testProtectedMode) {
     });
 
     // Initially all registers are expected to be zeroed.
-    checkRegs(0, 0, 0, 0, 0, 0, 0, 0);
+    checkRegs(0, 0, 0, 0, 0, 0, 0, defaultEsp);
 
     // Run the first instruction setting ax.
     runNSteps(1);
 
     // The expected value.
     u64 const val(0xABCD1234);
-    checkRegs(val, 0, 0, 0, 0, 0, 0, 0);
+    checkRegs(val, 0, 0, 0, 0, 0, 0, defaultEsp);
     runNSteps(2);
-    checkRegs(0, val, 0, 0, 0, 0, 0, 0);
+    checkRegs(0, val, 0, 0, 0, 0, 0, defaultEsp);
     runNSteps(2);
-    checkRegs(0, 0, val, 0, 0, 0, 0, 0);
+    checkRegs(0, 0, val, 0, 0, 0, 0, defaultEsp);
     runNSteps(2);
-    checkRegs(0, 0, 0, val, 0, 0, 0, 0);
+    checkRegs(0, 0, 0, val, 0, 0, 0, defaultEsp);
     runNSteps(2);
-    checkRegs(0, 0, 0, 0, val, 0, 0, 0);
+    checkRegs(0, 0, 0, 0, val, 0, 0, defaultEsp);
     runNSteps(2);
-    checkRegs(0, 0, 0, 0, 0, val, 0, 0);
+    checkRegs(0, 0, 0, 0, 0, val, 0, defaultEsp);
     runNSteps(2);
-    checkRegs(0, 0, 0, 0, 0, 0, val, 0);
+    checkRegs(0, 0, 0, 0, 0, 0, val, defaultEsp);
     runNSteps(2);
     checkRegs(0, 0, 0, 0, 0, 0, 0, val);
 }
@@ -330,6 +332,7 @@ DECLARE_TEST(testLongMode) {
     )");
     std::unique_ptr<X86Lab::Vm> const vm(
         createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly));
+    u64 const defaultRsp(X86Lab::PAGE_SIZE);
 
     // Check the values of the general purpose registers
     // @param rax, ..., r15: The expected values of the GP registers.
@@ -358,26 +361,26 @@ DECLARE_TEST(testLongMode) {
     });
 
     // Initially all registers are expected to be zeroed.
-    checkRegs(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    checkRegs(0, 0, 0, 0, 0, 0, 0, defaultRsp, 0, 0, 0, 0, 0, 0, 0, 0);
 
     // Run the first instruction setting ax.
     runNSteps(1);
 
     // The expected value.
     u64 const val(0xABCDEF1234567890);
-    checkRegs(val, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    checkRegs(val, 0, 0, 0, 0, 0, 0, defaultRsp, 0, 0, 0, 0, 0, 0, 0, 0);
     runNSteps(2);
-    checkRegs(0, val, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    checkRegs(0, val, 0, 0, 0, 0, 0, defaultRsp, 0, 0, 0, 0, 0, 0, 0, 0);
     runNSteps(2);
-    checkRegs(0, 0, val, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    checkRegs(0, 0, val, 0, 0, 0, 0, defaultRsp, 0, 0, 0, 0, 0, 0, 0, 0);
     runNSteps(2);
-    checkRegs(0, 0, 0, val, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    checkRegs(0, 0, 0, val, 0, 0, 0, defaultRsp, 0, 0, 0, 0, 0, 0, 0, 0);
     runNSteps(2);
-    checkRegs(0, 0, 0, 0, val, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    checkRegs(0, 0, 0, 0, val, 0, 0, defaultRsp, 0, 0, 0, 0, 0, 0, 0, 0);
     runNSteps(2);
-    checkRegs(0, 0, 0, 0, 0, val, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    checkRegs(0, 0, 0, 0, 0, val, 0, defaultRsp, 0, 0, 0, 0, 0, 0, 0, 0);
     runNSteps(2);
-    checkRegs(0, 0, 0, 0, 0, 0, val, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    checkRegs(0, 0, 0, 0, 0, 0, val, defaultRsp, 0, 0, 0, 0, 0, 0, 0, 0);
     runNSteps(2);
     checkRegs(0, 0, 0, 0, 0, 0, 0, val, 0, 0, 0, 0, 0, 0, 0, 0);
     runNSteps(2);

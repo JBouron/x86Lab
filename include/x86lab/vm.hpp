@@ -89,7 +89,7 @@ public:
     // initial value of the registers as well:
     //  - General purpose registers rax, rbx, rcx, rdx, rsi, rdi, rbp, rsp,
     //  r8-r15 always start with zero value, no matter which starting mode is
-    //  selected. /!\ This means no stack is setup!
+    //  selected. /!\ This means no stack is setup, until loadCode is called.
     //  - Rflags starts with value 0x2 (e.g. all non-reserved bits are 0 and
     //  interrupts disabled).
     //  - Segment registers value depend on the mode and are described below.
@@ -127,9 +127,10 @@ public:
     // mmap'ing.
     Vm(CpuMode const startMode, u64 const memorySize);
 
-    // Load code in the Vm. This function also sets the instruction pionter to
-    // the start of the loaded code. The address at which the code is actually
-    // loaded is un-defined.
+    // Load code in the Vm. The code is placed at address 0 and rip is reset to
+    // 0, e.g. pointing to the first instruction, rsp is set to point at the
+    // very top of the physical memory. After this function returns, the
+    // operating mode of the Vm is set to Runnable and execution can be started.
     // @param shellCode: Pointer to x86 machine code to be loaded.
     // @param shellCodeSize: The size of the code to be loaded in bytes.
     void loadCode(u8 const * const shellCode, u64 const shellCodeSize);

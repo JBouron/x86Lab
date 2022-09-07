@@ -60,9 +60,11 @@ void Vm::loadCode(u8 const * const shellCode, u64 const shellCodeSize) {
     // For now the code is always loaded at address 0x0.
     std::memcpy(memory, shellCode, shellCodeSize);
 
-    // Set RIP to first instruction.
     State::Registers regs(getRegisters());
+    // Set RIP to first instruction.
     regs.rip = 0x0;
+    // Set RSP to point after the end of physical memory.
+    regs.rsp = physicalMemorySize;
     setRegisters(regs);
 
     // The KVM is now runnable.
