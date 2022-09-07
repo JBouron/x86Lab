@@ -44,7 +44,8 @@ public:
     // physical memory's boundary leads to reading zeroes.
     // @param offset: The offset to read from.
     // @param size: The number of bytes to read.
-    std::unique_ptr<u8> readPhysicalMemory(u64 const offset, u64 const size);
+    std::unique_ptr<u8> readPhysicalMemory(u64 const offset,
+                                           u64 const size) const;
 
 private:
     std::shared_ptr<Snapshot> baseSnapshot;

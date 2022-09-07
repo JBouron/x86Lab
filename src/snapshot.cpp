@@ -26,7 +26,7 @@ Snapshot::Registers const& Snapshot::registers() const {
 }
 
 std::unique_ptr<u8> Snapshot::readPhysicalMemory(u64 const offset,
-                                                 u64 const size) {
+                                                 u64 const size) const {
     std::unique_ptr<u8> buf(new u8[size]);
     std::memset(buf.get(), 0, size);
     Vm::State::Memory const& mem(vmState->memory());
