@@ -38,7 +38,7 @@ Vm::Vm(CpuMode const startMode, u64 const memorySize) :
     vcpuFd(Util::Kvm::createVcpu(vmFd)),
     kvmRun(Util::Kvm::getVcpuRunStruct(vcpuFd)),
     physicalMemorySize(memorySize * PAGE_SIZE),
-    memory(std::get<0>(addPhysicalMemory(memorySize, false))),
+    memory(std::get<0>(addPhysicalMemory(memorySize))),
     currState(OperatingState::NoCodeLoaded)
     {
     // Disable any MSR access filtering. KVM's doc indicate that if this is not
@@ -434,7 +434,7 @@ u64 Vm::createIdentityMapping() {
                 // The entry is marked non-present, e.g. there is no table in
                 // the lower-level. Allocate the next table, map it to the
                 // current table, then recurse into it.
-                std::pair<void*, u64> const alloc(addPhysicalMemory(1, false));
+                std::pair<void*, u64> const alloc(addPhysicalMemory(1));
                 // The offset of the allocated table in the guest's physical
                 // memory. This is the offset that we need to write in the
                 // current table's entry.
@@ -469,7 +469,7 @@ u64 Vm::createIdentityMapping() {
     // Allocate a PML4, the root of the page table structure.
     // Note: We cannot allocate the page tables as read-only memory because the
     // vcpu writes the dirty and accessed bits in the page table entries.
-    std::pair<void*, u64> const pml4Alloc(addPhysicalMemory(1, false));
+    std::pair<void*, u64> const pml4Alloc(addPhysicalMemory(1));
     // Host-side address of the PML4.
     u64 * const hostPml4(reinterpret_cast<u64*>(std::get<0>(pml4Alloc)));
     // Guest-side offset of the PML4.
@@ -483,8 +483,7 @@ u64 Vm::createIdentityMapping() {
     return guestPml4;
 }
 
-std::pair<void*, u64> Vm::addPhysicalMemory(u32 const numPages,
-                                            bool const isReadOnly) {
+std::pair<void*, u64> Vm::addPhysicalMemory(u32 const numPages) {
     if (memorySlots.size() == Util::Kvm::getMaxMemSlots(vmFd)) {
         // We are already using as many slots as we can. Note this will most
         // likely never happen as KVM reports 32k slots on most machines.
@@ -512,7 +511,7 @@ std::pair<void*, u64> Vm::addPhysicalMemory(u32 const numPages,
     // Then map the memory to the guest.
     kvm_userspace_memory_region const kvmMap({
         .slot = static_cast<u32>(memorySlots.size()),
-        .flags = static_cast<u32>(isReadOnly ? KVM_MEM_READONLY : 0),
+        .flags = 0,
         .guest_phys_addr = phyAddr,
         .memory_size = allocSize,
         .userspace_addr = reinterpret_cast<u64>(userspace),

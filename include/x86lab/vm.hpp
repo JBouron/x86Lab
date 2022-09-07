@@ -208,8 +208,7 @@ private:
     // new memory was mmap'ed, and the second is the guest-physical-address at
     // which the allocated memory starts.
     // @throws: KvmError or MmapError in case of kvm ioctl error or mmap error.
-    std::pair<void*, u64> addPhysicalMemory(u32 const numPages,
-                                            bool const isReadOnly);
+    std::pair<void*, u64> addPhysicalMemory(u32 const numPages);
 
     // File descriptor for the KVM.
     int const vmFd;
