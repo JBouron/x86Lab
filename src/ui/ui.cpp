@@ -6,7 +6,7 @@
 namespace X86Lab::Ui {
 
 State::State(Vm::OperatingState const runState,
-             std::shared_ptr<Assembler::Code const> const code,
+             std::shared_ptr<Code const> const code,
              std::shared_ptr<Snapshot const> const snapshot) :
     runState(runState), 
     loadedCode(code),

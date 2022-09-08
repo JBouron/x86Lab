@@ -1,5 +1,5 @@
 #include <x86lab/vm.hpp>
-#include <x86lab/assembler.hpp>
+#include <x86lab/code.hpp>
 #include <x86lab/test.hpp>
 #include <fstream>
 
@@ -33,7 +33,7 @@ static std::unique_ptr<X86Lab::Vm> createVmAndLoadCode(
     u64 const memorySizePages = 1) {
 
     std::string const fileName(writeCode(assembly));
-    std::shared_ptr<Assembler::Code> const code(new Assembler::Code(fileName));
+    std::shared_ptr<Code> const code(new Code(fileName));
     std::unique_ptr<X86Lab::Vm> vm(new X86Lab::Vm(startMode, memorySizePages));
     vm->loadCode(code->machineCode(), code->size());
     return vm;

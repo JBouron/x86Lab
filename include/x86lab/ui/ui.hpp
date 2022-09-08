@@ -1,6 +1,6 @@
 #pragma once
 #include <x86lab/vm.hpp>
-#include <x86lab/assembler.hpp>
+#include <x86lab/code.hpp>
 #include <x86lab/snapshot.hpp>
 #include <string>
 #include <memory>
@@ -35,7 +35,7 @@ public:
     // @param code: The code that is currently loaded and running on the Vm.
     // @param snapshot: The latest snapshot of the VM.
     State(Vm::OperatingState const runState,
-          std::shared_ptr<Assembler::Code const> const code, 
+          std::shared_ptr<Code const> const code, 
           std::shared_ptr<Snapshot const> const snapshot);
 
     // @return: true if the VM is runnable, false otherwise.
@@ -64,7 +64,7 @@ public:
 
 private:
     Vm::OperatingState runState;
-    std::shared_ptr<Assembler::Code const> loadedCode;
+    std::shared_ptr<Code const> loadedCode;
     std::shared_ptr<Snapshot const> const latestSnapshot;
 };
 

@@ -73,7 +73,8 @@ static std::unique_ptr<InstructionMap const> parseListFile(
     return std::unique_ptr<InstructionMap const>(map);
 }
 
-Code::Code(std::string const& filePath) : file(filePath) {
+std::tuple<std::unique_ptr<u8>, u64, std::unique_ptr<InstructionMap const>>
+invoke(std::string const& filePath) {
     // Output file to be used by the NASM assembler.
     std::string const outputFileName(getUniqueFileName());
     // Use binary output format ("-f bin") so that the resulting code only
@@ -99,30 +100,10 @@ Code::Code(std::string const& filePath) : file(filePath) {
     }
 
     // Insert the bytes of the file into `code`.
-    code = std::shared_ptr<u8>(new u8[outputFileSize]);
-    codeSize = outputFileSize;
+    std::unique_ptr<u8> code(new u8[outputFileSize]);
     output.read(reinterpret_cast<char*>(code.get()), outputFileSize);
+    std::unique_ptr<InstructionMap const> map(parseListFile(listFileName));
 
-    map = parseListFile(listFileName);
-}
-
-u8 const* Code::machineCode() const {
-    return code.get();
-}
-
-u64 Code::size() const {
-    return codeSize;
-}
-
-u64 Code::offsetToLine(u64 const offset) const {
-    if (!map->contains(offset)) {
-        return 0;
-    } else {
-        return map->at(offset);
-    }
-}
-
-std::string const& Code::fileName() const {
-    return file;
+    return {std::move(code), outputFileSize, std::move(map)};
 }
 }

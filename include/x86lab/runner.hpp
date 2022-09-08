@@ -14,7 +14,7 @@ public:
     // @param code: The code to run on the Vm.
     // @param ui: The UI to use as input/output.
     Runner(std::shared_ptr<Vm> const vm,
-           std::shared_ptr<Assembler::Code const> const code,
+           std::shared_ptr<Code const> const code,
            std::shared_ptr<Ui::Backend> const ui);
 
     // Run the main-loop. This function only returns once the user has requested
@@ -23,7 +23,7 @@ public:
 
 private:
     std::shared_ptr<Vm> vm;
-    std::shared_ptr<Assembler::Code const> code;
+    std::shared_ptr<Code const> code;
     std::shared_ptr<Ui::Backend> ui;
 
     // The full execution history. This vector contains the snapshots of the Vm

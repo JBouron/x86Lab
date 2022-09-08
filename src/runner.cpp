@@ -2,7 +2,7 @@
 
 namespace X86Lab {
 Runner::Runner(std::shared_ptr<Vm> const vm,
-               std::shared_ptr<Assembler::Code const> const code,
+               std::shared_ptr<Code const> const code,
                std::shared_ptr<Ui::Backend> const ui) :
     vm(vm),
     code(code),
