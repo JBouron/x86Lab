@@ -25,9 +25,7 @@ u64 State::currentLine() const {
 }
 
 u64 State::mapToLine(u64 const address) const {
-    Assembler::InstructionMap const& map(loadedCode->getInstructionMap());
-    // Re-use the mapInstructionPointer to map an arbitrary address.
-    return map.mapInstructionPointer(address).line;
+    return loadedCode->offsetToLine(address);
 }
 
 Snapshot::Registers const& State::registers() const {

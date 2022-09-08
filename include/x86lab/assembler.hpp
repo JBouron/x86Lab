@@ -6,57 +6,9 @@
 #include <x86lab/util.hpp>
 
 namespace X86Lab::Assembler {
-// Holds the mapping between instructions and addresses and source line numbers.
-// This is nothing more than a map offset -> entry, where the offset is the
-// value of the instruction pointer/address and entry contains:
-//  - The line number in the source file
-//  - Listing of the instruction.
-class InstructionMap {
-public:
-    // Construct an empty map.
-    InstructionMap();
-
-    // Entry in the map.
-    class Entry {
-    public:
-        // The default entry. This is used as a sentinel value to indicate that
-        // there is no entry associated to a particular offset/address.
-        Entry();
-
-        // Create an entry.
-        // @param line: The line that correspond to the offset associated with
-        // this entry.
-        // @param instruction: The instruction listing for this line/entry.
-        Entry(u64 const line, std::string const& instruction);
-
-        // Test if this entry is the sentinel value or not.
-        // @return: true if the entry correspond to a real instruction in the
-        // source file, false otherwise.
-        operator bool() const;
-
-        u64 line;
-        std::string instruction;
-    };
-
-    // Add an entry to the Instruction map.
-    // @param offset: The offset/address associated with the entry.
-    // @param entry: The entry to be added.
-    void addEntry(u64 const offset, Entry const& entry);
-
-    // Map the value of the instruction pointer to the corresponding entry in
-    // the map.
-    // @param ip: The instruction pointer.
-    // @return: The associated entry. If the instruction pointer does not map to
-    // any instruction/line from the source file then the returned entry is the
-    // default entry.
-    Entry const& mapInstructionPointer(u64 const ip) const;
-
-private:
-    // The value to return in mapInstructionPointer if no mapping exists.
-    Entry const sentinel;
-    // The underlying map of entries.
-    std::map<u64, Entry> map;
-};
+// Holds the mapping between addresses and source line numbers.
+// This is nothing more than a map address -> line#.
+using InstructionMap = std::map<u64, u64>;
 
 // Wrapper around some assembled code that should be run by a VM.
 class Code {
@@ -69,9 +21,11 @@ public:
     // @return: Size in bytes.
     u64 size() const;
 
-    // Get a reference to the InstructionMap associated to this code.
-    // @return: const ref to the map.
-    InstructionMap const& getInstructionMap() const;
+    // Get the line number for a given offset in the code.
+    // @param offset: The offset to map.
+    // @return: The line number corresponding to the offset. If offset cannot be
+    // mapped to any line, 0 is returned.
+    u64 offsetToLine(u64 const offset) const;
 
     // Get the filename.
     std::string const& fileName() const;
