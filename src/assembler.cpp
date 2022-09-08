@@ -1,11 +1,14 @@
 #include <x86lab/assembler.hpp>
 #include <fstream>
-#include <array>
 #include <iostream>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <sstream>
+#include <vector>
+#include <unistd.h>
 
 namespace X86Lab::Assembler {
+// Implementation of X86Lab::Assembler::invoke using the NASM assembler.
 
 // Get a unique file name that is not in use under /tmp.
 // @return: The file name.
@@ -73,6 +76,39 @@ static std::unique_ptr<InstructionMap const> parseListFile(
     return std::unique_ptr<InstructionMap const>(map);
 }
 
+// Run the NASM assembler with the given argument and wait for it to exit.
+// @param args: Cmd-line arguments to pass to NASM. args[i] will be mapped to
+// argv[i+1] when calling nasm (e.g. args[0] is the first arg, not the name of
+// the executable).
+// @throw: An Error in case the call to nasm failed.
+static void runNasm(std::vector<char const *> const& args) {
+    std::vector<char const *> argv(args);
+    argv.insert(argv.begin(), "nasm");
+    argv.push_back(NULL);
+    int const childPid(fork());
+    if (childPid == -1) {
+        throw Error("Couldn't fork nasm", errno);
+    }
+    if (!childPid) {
+        // This is the child process, run the assembler.
+        ::execvp("nasm", const_cast<char *const *>(argv.data()));
+        // In case of error return 1 to the parent.
+        std::exit(1);
+    }
+
+    int wstatus;
+    do {
+        if (waitpid(childPid, &wstatus, 0) == -1) {
+            throw Error("Failed to call waitpid", errno);
+        }
+    } while(!WIFEXITED(wstatus));
+
+    int const childRet(WEXITSTATUS(wstatus));
+    if (!!childRet) {
+        throw Error("nasm returned error", errno);
+    }
+}
+
 std::tuple<std::unique_ptr<u8>, u64, std::unique_ptr<InstructionMap const>>
 invoke(std::string const& filePath) {
     // Output file to be used by the NASM assembler.
@@ -80,11 +116,13 @@ invoke(std::string const& filePath) {
     // Use binary output format ("-f bin") so that the resulting code only
     // contains the raw machine code.
     std::string const listFileName(getUniqueFileName());
-    std::string const cmd("nasm -f bin -l " + listFileName + " " + filePath +
-        " -o " + outputFileName);
-    if (!!std::system(cmd.c_str())) {
-        throw Error("Could not invoke assembler", errno);
-    }
+    std::vector<char const *> const args({
+        "-f", "bin",
+        "-l", listFileName.c_str(),
+        filePath.c_str(),
+        "-o", outputFileName.c_str(),
+    });
+    runNasm(args);
 
     // Get size of machine code.
     struct stat outputFileStat;
