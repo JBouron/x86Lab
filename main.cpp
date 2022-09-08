@@ -28,7 +28,7 @@ static void run(Vm::CpuMode const vmStartMode, std::string const& fileName) {
 
     // Assemble the code.
     ui->log("Assembling code in " + fileName);
-    std::shared_ptr<Assembler::Code> const code(Assembler::assemble(fileName));
+    std::shared_ptr<Assembler::Code> const code(new Assembler::Code(fileName));
     ui->log("Assembled code is " + std::to_string(code->size()) + " bytes");
 
     // Create the VM and load the code in memory.
