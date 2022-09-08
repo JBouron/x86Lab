@@ -4,6 +4,8 @@
 #include <memory>
 
 namespace X86Lab {
+// Opaque type performing the actual memory snapshot deduplication.
+class BlockTree;
 
 // A snapshot of the VM state. Each snapshot is built on a previous snapshot,
 // called a base. The goal of snapshots is to explore the state of the machine
@@ -52,9 +54,7 @@ private:
     std::shared_ptr<Snapshot> baseSnapshot;
     // The value of all the register at that snapshot.
     Vm::State::Registers regs;
-    // The size of the physical memory.
-    u64 memSize;
-    // A complete copy of the physical memory.
-    std::unique_ptr<u8[]> mem;
+    // Underlying BlockTree holding the snapshot of memory.
+    std::shared_ptr<BlockTree> blockTree;
 };
 }
