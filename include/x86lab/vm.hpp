@@ -1,7 +1,8 @@
 #pragma once
+#include <x86lab/util.hpp>
+#include <x86lab/code.hpp>
 #include <iostream>
 #include <memory>
-#include <x86lab/util.hpp>
 #include <vector>
 #include <utility>
 
@@ -135,9 +136,8 @@ public:
     // 0, e.g. pointing to the first instruction, rsp is set to point at the
     // very top of the physical memory. After this function returns, the
     // operating mode of the Vm is set to Runnable and execution can be started.
-    // @param shellCode: Pointer to x86 machine code to be loaded.
-    // @param shellCodeSize: The size of the code to be loaded in bytes.
-    void loadCode(u8 const * const shellCode, u64 const shellCodeSize);
+    // @param code: The Code to be loaded.
+    void loadCode(Code const& code);
 
     // Get a copy of this VM's state. Note that this is an expensive operation
     // since it creates a full copy of the VM's physical memory.

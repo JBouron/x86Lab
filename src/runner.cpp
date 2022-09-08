@@ -9,7 +9,7 @@ Runner::Runner(std::shared_ptr<Vm> const vm,
     ui(ui),
     historyIndex(0) {
     if (vm->operatingState() == Vm::OperatingState::NoCodeLoaded) {
-        vm->loadCode(code->machineCode(), code->size());
+        vm->loadCode(*code);
     }
 
     // Setup the base snapshot.

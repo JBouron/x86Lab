@@ -33,9 +33,9 @@ static std::unique_ptr<X86Lab::Vm> createVmAndLoadCode(
     u64 const memorySizePages = 1) {
 
     std::string const fileName(writeCode(assembly));
-    std::shared_ptr<Code> const code(new Code(fileName));
+    Code const code(fileName);
     std::unique_ptr<X86Lab::Vm> vm(new X86Lab::Vm(startMode, memorySizePages));
-    vm->loadCode(code->machineCode(), code->size());
+    vm->loadCode(code);
     return vm;
 }
 

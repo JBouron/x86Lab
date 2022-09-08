@@ -56,9 +56,9 @@ Vm::Vm(CpuMode const startMode, u64 const memorySize) :
     setRegistersInitialValue(startMode);
 }
 
-void Vm::loadCode(u8 const * const shellCode, u64 const shellCodeSize) {
+void Vm::loadCode(Code const& code) {
     // For now the code is always loaded at address 0x0.
-    std::memcpy(memory, shellCode, shellCodeSize);
+    std::memcpy(memory, code.machineCode(), code.size());
 
     State::Registers regs(getRegisters());
     // Set RIP to first instruction.
