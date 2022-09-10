@@ -28,7 +28,7 @@ static void run(Vm::CpuMode const vmStartMode, std::string const& fileName) {
 
     // Assemble the code.
     ui->log("Assembling code in " + fileName);
-    std::shared_ptr<Assembler::Code> const code(new Assembler::Code(fileName));
+    std::shared_ptr<Code> const code(new Code(fileName));
     ui->log("Assembled code is " + std::to_string(code->size()) + " bytes");
 
     // Create the VM and load the code in memory.
@@ -43,7 +43,7 @@ static void run(Vm::CpuMode const vmStartMode, std::string const& fileName) {
         ui->log("Vm is using 16-bit real-mode");
     }
 
-    vm->loadCode(code->machineCode(), code->size());
+    vm->loadCode(*code);
     ui->log("Code loaded");
 
 
