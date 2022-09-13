@@ -132,6 +132,10 @@ public:
     // mmap'ing.
     Vm(CpuMode const startMode, u64 const memorySize);
 
+    // Destroy the VM. This deallocates all mmaped physical memory and releases
+    // KVM resources.
+    ~Vm();
+
     // Load code in the Vm. The code is placed at address 0 and rip is reset to
     // 0, e.g. pointing to the first instruction, rsp is set to point at the
     // very top of the physical memory. After this function returns, the

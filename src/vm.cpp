@@ -56,6 +56,27 @@ Vm::Vm(CpuMode const startMode, u64 const memorySize) :
     setRegistersInitialValue(startMode);
 }
 
+Vm::~Vm() {
+    // FIXME: The kvm_run structure is an mmap on the vcpuFd. Unmap it before
+    // closing the vcpuFd. This could be solved using a custom type returned by
+    // getVcpuRunStruct, with RAII doing the munmap in its destructor.
+    if (::close(vcpuFd) == -1) {
+        std::perror("Cannot close KVM Vcpu file descriptor:");
+    } else if (::close(vmFd) == -1) {
+        std::perror("Cannot close KVM VM file descriptor:");
+    }
+
+    // Un-map all physical memory.
+    for (kvm_userspace_memory_region const& region : memorySlots) {
+        void * const addr(reinterpret_cast<void*>(region.userspace_addr));
+        u64 const len(region.memory_size);
+        if (::munmap(addr, len) == -1) {
+            // Virtually impossible if we are passing the output of mmap here.
+            std::perror("Failed to unmap memory region:");
+        }
+    }
+}
+
 void Vm::loadCode(Code const& code) {
     // For now the code is always loaded at address 0x0.
     std::memcpy(memory, code.machineCode(), code.size());
