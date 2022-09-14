@@ -4,7 +4,20 @@
 
 namespace X86Lab {
 
-Vm::State::Registers::Registers(kvm_regs const& regs, kvm_sregs const& sregs) :
+// Convert an array of bytes into a u64. Assumes little-endian encoding.
+// @param array: The array of bytes, must be at least 8 bytes long.
+// @return: The u64 encoded in `array`.
+static u64 byteArrayToU64(u8 const * const array) {
+    u64 acc(0);
+    for (u8 i(0); i < 8; ++i) {
+        acc |= (u64(array[i]) << (i * 8));
+    }
+    return acc;
+}
+
+Vm::State::Registers::Registers(kvm_regs const& regs,
+                                kvm_sregs const& sregs,
+                                kvm_fpu const& fpu) :
     rax(regs.rax), rbx(regs.rbx), rcx(regs.rcx), rdx(regs.rdx),
     rdi(regs.rdi), rsi(regs.rsi), rsp(regs.rsp), rbp(regs.rbp),
     r8(regs.r8),   r9(regs.r9),   r10(regs.r10), r11(regs.r11),
@@ -19,7 +32,13 @@ Vm::State::Registers::Registers(kvm_regs const& regs, kvm_sregs const& sregs) :
     cr8(sregs.cr8), efer(sregs.efer),
 
     idt({.base = sregs.idt.base, .limit = sregs.idt.limit}),
-    gdt({.base = sregs.gdt.base, .limit = sregs.gdt.limit}) {}
+    gdt({.base = sregs.gdt.base, .limit = sregs.gdt.limit}),
+
+    // MMX registers are aliased with old x87 FPU registers.
+    mm0(byteArrayToU64(fpu.fpr[0])), mm1(byteArrayToU64(fpu.fpr[1])),
+    mm2(byteArrayToU64(fpu.fpr[2])), mm3(byteArrayToU64(fpu.fpr[3])),
+    mm4(byteArrayToU64(fpu.fpr[4])), mm5(byteArrayToU64(fpu.fpr[5])),
+    mm6(byteArrayToU64(fpu.fpr[6])), mm7(byteArrayToU64(fpu.fpr[7])) {}
 
 Vm::State::Registers const& Vm::State::registers() const {
     return m_regs;
@@ -105,7 +124,16 @@ std::unique_ptr<Vm::State> Vm::getState() const {
 Vm::State::Registers Vm::getRegisters() const {
     kvm_regs const regs(Util::Kvm::getRegs(m_vcpuFd));
     kvm_sregs const sregs(Util::Kvm::getSRegs(m_vcpuFd));
-    return State::Registers(regs, sregs);
+    kvm_fpu const fpu(Util::Kvm::getFpu(m_vcpuFd));
+    return State::Registers(regs, sregs, fpu);
+}
+
+// Fill fpu.fpr[regIdx] with value.
+static void fillMmxRegister(kvm_fpu& fpu, u8 const regIdx, u64 const value) {
+    assert(regIdx < 8);
+    for (u8 i(0); i < 8; ++i) {
+        fpu.fpr[regIdx][i] = (value >> (i * 8)) & 0xFF;
+    }
 }
 
 void Vm::setRegisters(State::Registers const& registerValues) {
@@ -141,6 +169,19 @@ void Vm::setRegisters(State::Registers const& registerValues) {
     sregs.gdt.limit = registerValues.gdt.limit;
 
     Util::Kvm::setSRegs(m_vcpuFd, sregs);
+
+    // Set the MMX registers.
+    kvm_fpu fpu(Util::Kvm::getFpu(m_vcpuFd));
+    fillMmxRegister(fpu, 0, registerValues.mm0);
+    fillMmxRegister(fpu, 1, registerValues.mm1);
+    fillMmxRegister(fpu, 2, registerValues.mm2);
+    fillMmxRegister(fpu, 3, registerValues.mm3);
+    fillMmxRegister(fpu, 4, registerValues.mm4);
+    fillMmxRegister(fpu, 5, registerValues.mm5);
+    fillMmxRegister(fpu, 6, registerValues.mm6);
+    fillMmxRegister(fpu, 7, registerValues.mm7);
+
+    Util::Kvm::setFpu(m_vcpuFd, fpu);
 }
 
 Vm::OperatingState Vm::operatingState() const {
@@ -265,14 +306,14 @@ static kvm_segment computeSegmentRegister(Vm::CpuMode const mode,
 
     // Only set if the current mode is 32-bit (this indicates 32-bit default
     // operation size).
-    seg.db = !!(mode == Vm::CpuMode::ProtectedMode);
+    seg.db = (mode == Vm::CpuMode::ProtectedMode);
 
     // Must be 1.
     seg.s = 1;
 
     // Only set if the current mode is 64-bit. If L is set then DB must be
     // unset.
-    seg.l = !!(mode == Vm::CpuMode::LongMode);
+    seg.l = (mode == Vm::CpuMode::LongMode);
 
     // Granularity bit:
     //  - If any bit in limit[11:0] is 0 then G must be 0.
@@ -366,8 +407,15 @@ void Vm::enableCpuMode(kvm_sregs& sregs, CpuMode const mode) {
 
     // Both protected mode and long mode require having the PE bit (bit 0) set
     // in CR0.
-    // For protected mode that's all we need, since we are not enabling paging.
     sregs.cr0 |= 1;
+
+    // Prepare MMX in both Protected and Long modes. Set MP to 1, EM to 0 and TS
+    // to 0 as recommended by Intel's docs.
+    // FIXME: We should probably add a check that this CPU supports MMX. However
+    // this extension has been around so long that virtually every cpu supports
+    // it.
+    sregs.cr0 |= (1 << 1);
+    sregs.cr0 &= (~((1 << 2) | (1 << 3)));
 
     if (mode == CpuMode::LongMode) {
         // 64-bit is a bit more involved. We need to setup multiple control

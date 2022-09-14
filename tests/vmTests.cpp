@@ -566,9 +566,9 @@ DECLARE_TEST(testReadControlRegisters) {
 }
 
 // Check that Vm::setRegisters() actually set the registers to their correct
-// value. For now all registers (GP, control registers, GDTR and IDTR) are
-// tested. Segment registers are not tested here since changing their value is
-// not yet fully specified (FIXME).
+// value. For now GP registers, control registers, GDTR and IDTR and XMM
+// registers  are tested. Segment registers are not tested here since changing
+// their value is not yet fully specified (FIXME).
 // This test assumes that Vm::getRegisters() works as intended an returns the
 // correct value of all registers (getRegisters is tested above).
 DECLARE_TEST(testSetRegisters) {
@@ -624,6 +624,16 @@ DECLARE_TEST(testSetRegisters) {
 
     // Toggle IF flag in RFLAGS.
     expected.rflags ^= (1 << 9);
+
+    // Set the MMX registers to some arbitrary values.
+    expected.mm0 = 0x0101010101010101;
+    expected.mm1 = 0x0202020202020202;
+    expected.mm2 = 0x0303030303030303;
+    expected.mm3 = 0x0404040404040404;
+    expected.mm4 = 0x0505050505050505;
+    expected.mm5 = 0x0606060606060606;
+    expected.mm6 = 0x0707070707070707;
+    expected.mm7 = 0x0808080808080808;
 
     // Set the registers on the VM.
     vm->setRegisters(expected);
@@ -801,5 +811,126 @@ DECLARE_TEST(testReadMemory) {
 	vm->setRegisters(regs);
     run();
     checkMem(regs.rax);
+}
+
+// Test reading the floating point registers.
+DECLARE_TEST(testReadFpu) {
+    std::string const assembly(R"(
+        BITS 64
+        xor     rax, rax
+        mov     rbx, 0xDEADBEEFCAFEBABE
+
+        movq    mm0, rbx
+        movq    mm0, rax
+
+        movq    mm1, rbx
+        movq    mm1, rax
+
+        movq    mm2, rbx
+        movq    mm2, rax
+
+        movq    mm3, rbx
+        movq    mm3, rax
+
+        movq    mm4, rbx
+        movq    mm4, rax
+
+        movq    mm5, rbx
+        movq    mm5, rax
+
+        movq    mm6, rbx
+        movq    mm6, rax
+
+        movq    mm7, rbx
+        movq    mm7, rax
+
+        hlt
+    )");
+    std::unique_ptr<X86Lab::Vm> const vm(
+        createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly));
+
+    // Check the MMX register against the expected values.
+    // @param mm0-mm7: The expected value of each MMX register.
+    auto const checkRegs([&](u64 mm0, u64 mm1, u64 mm2, u64 mm3,
+                             u64 mm4, u64 mm5, u64 mm6, u64 mm7) {
+        X86Lab::Vm::State::Registers const regs(vm->getRegisters());
+        TEST_ASSERT(regs.mm0 == mm0);
+        TEST_ASSERT(regs.mm1 == mm1);
+        TEST_ASSERT(regs.mm2 == mm2);
+        TEST_ASSERT(regs.mm3 == mm3);
+        TEST_ASSERT(regs.mm4 == mm4);
+        TEST_ASSERT(regs.mm5 == mm5);
+        TEST_ASSERT(regs.mm6 == mm6);
+        TEST_ASSERT(regs.mm7 == mm7);
+    });
+
+    // Step the VM multiple times, asserting everytime that the VM remains
+    // Runnable.
+    // @param n: The number of steps to execute.
+    auto const runVm([&](u64 const n) {
+        for (u64 i(0); i < n; ++i) {
+            TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+        }
+    });
+
+    // Run the prelogue.
+    runVm(2);
+
+    u64 const v(0xDEADBEEFCAFEBABEULL);
+    checkRegs(0, 0, 0, 0, 0, 0, 0, 0);
+    runVm(1);
+    checkRegs(v, 0, 0, 0, 0, 0, 0, 0);
+    runVm(2);
+    checkRegs(0, v, 0, 0, 0, 0, 0, 0);
+    runVm(2);
+    checkRegs(0, 0, v, 0, 0, 0, 0, 0);
+    runVm(2);
+    checkRegs(0, 0, 0, v, 0, 0, 0, 0);
+    runVm(2);
+    checkRegs(0, 0, 0, 0, v, 0, 0, 0);
+    runVm(2);
+    checkRegs(0, 0, 0, 0, 0, v, 0, 0);
+    runVm(2);
+    checkRegs(0, 0, 0, 0, 0, 0, v, 0);
+    runVm(2);
+    checkRegs(0, 0, 0, 0, 0, 0, 0, v);
+}
+
+// Check that MMX is supported and properly initialized by running an MMX
+// instruction.
+DECLARE_TEST(testMmxInstruction) {
+    // Simple packed word add with unsigned saturation.
+    std::string const assembly(R"(
+        BITS 64
+        mov     rax, 0xBABECACAF00F1337
+        mov     rbx, 0x1EAD1EEFCAFEBABE
+
+        movq    mm0, rax
+        movq    mm1, rbx
+
+        paddusw mm0, mm1
+
+        hlt
+    )");
+    std::unique_ptr<X86Lab::Vm> const vm(
+        createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly));
+
+    // Step the VM multiple times, asserting everytime that the VM remains
+    // Runnable.
+    // @param n: The number of steps to execute.
+    auto const runVm([&](u64 const n) {
+        for (u64 i(0); i < n; ++i) {
+            TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+        }
+    });
+
+    runVm(5);
+
+    // The expected value is simply the word-wise add of the two values, clamped
+    // to 0xFFFF.
+    u64 const expected(0xD96BE9B9FFFFCDF5);
+
+    u64 const mm0(vm->getRegisters().mm0);
+    TEST_ASSERT(mm0 == expected);
 }
 }

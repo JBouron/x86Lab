@@ -11,7 +11,7 @@ static std::unique_ptr<X86Lab::Vm::State> genRandomState(u64 const memSize) {
 
     // Those value might not be valid, but it does not matter for Snapshot
     // tests.
-    X86Lab::Vm::State::Registers regs({}, {});
+    X86Lab::Vm::State::Registers regs({}, {}, {});
     regs.rax = generator();
     regs.rbx = generator();
     regs.rcx = generator();
@@ -44,6 +44,14 @@ static std::unique_ptr<X86Lab::Vm::State> genRandomState(u64 const memSize) {
     regs.efer = generator();
     regs.idt = { .base = generator(), .limit = static_cast<u16>(generator()) };
     regs.gdt = { .base = generator(), .limit = static_cast<u16>(generator()) };
+    regs.mm0 = generator();
+    regs.mm1 = generator();
+    regs.mm2 = generator();
+    regs.mm3 = generator();
+    regs.mm4 = generator();
+    regs.mm5 = generator();
+    regs.mm6 = generator();
+    regs.mm7 = generator();
 
     TEST_ASSERT(!(memSize % 8));
 

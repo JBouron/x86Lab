@@ -51,12 +51,25 @@ public:
             Table idt;
             Table gdt;
 
+            // MMX registers.
+            u64 mm0;
+            u64 mm1;
+            u64 mm2;
+            u64 mm3;
+            u64 mm4;
+            u64 mm5;
+            u64 mm6;
+            u64 mm7;
+
             // TODO: Include floating point registers.
 
             // Build a Registers from KVM's data structures.
             // @param regs: The value of general purpose registers.
             // @param sregs: The value of special registers.
-            Registers(kvm_regs const& regs, kvm_sregs const& sregs);
+            // @param fpu: The state of the fpu.
+            Registers(kvm_regs const& regs,
+                      kvm_sregs const& sregs,
+                      kvm_fpu const& fpu);
 
             bool operator==(Registers const&) const = default;
         };

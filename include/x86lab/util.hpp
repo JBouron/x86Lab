@@ -105,5 +105,17 @@ void setSRegs(int const vcpuFd, kvm_sregs const& regs);
 // @return: The maximum number of memory slots supported by vmFd.
 // @throws: A KvmError in case of error.
 u16 getMaxMemSlots(int const vmFd);
+
+// Get the state of the vcpu's FPU. This calls the KVM_GET_FPU ioctl.
+// @param vcpuFd: The file descriptor of the target vcpu.
+// @return: A kvm_fpu struct containing the current state of the vcpu's FPU.
+// @throws: A KvmError in case of error.
+kvm_fpu getFpu(int const vcpuFd);
+
+// Set the state of the FPU on a vcpu. This calls the KVM_SET_FPU ioctl.
+// @param vcpuFd: The file descriptor of the target vcpu.
+// @param fpu: The FPU state to set on the vcpu.
+// @throws: A KvmError in case of error.
+void setFpu(int const vcpuFd, kvm_fpu const& fpu);
 }
 }

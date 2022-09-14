@@ -118,4 +118,18 @@ u16 getMaxMemSlots(int const vmFd) {
     }
     return max;
 }
+
+kvm_fpu getFpu(int const vcpuFd) {
+    kvm_fpu fpu{};
+    if (::ioctl(vcpuFd, KVM_GET_FPU, &fpu) == -1) {
+        throw KvmError("Cannot get guest FPU state", errno);
+    }
+    return fpu;
+}
+
+void setFpu(int const vcpuFd, kvm_fpu const& fpu) {
+    if (::ioctl(vcpuFd, KVM_SET_FPU, &fpu) == -1) {
+        throw KvmError("Cannot set guest FPU state", errno);
+    }
+}
 }
