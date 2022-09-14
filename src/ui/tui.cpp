@@ -77,77 +77,92 @@ void Tui::doUpdateRegWin(Snapshot::Registers const& prevRegs,
     Window& w(*regWin);
     w.clearAndResetCursor();
 
+    Snapshot::Registers const& p(prevRegs);
+    Snapshot::Registers const& n(newRegs);
+
     char buf[512];
-    sprintf(buf, "rax = 0x%016lx   rbx = 0x%016lx\n", prevRegs.rax, prevRegs.rbx);
+    sprintf(buf, "rax = 0x%016lx   rbx = 0x%016lx\n", p.rax, p.rbx);
     w << buf;
-    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", newRegs.rax, newRegs.rbx);
+    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", n.rax, n.rbx);
     w << buf;
-    sprintf(buf, "rcx = 0x%016lx   rdx = 0x%016lx\n", prevRegs.rcx, prevRegs.rdx);
+    sprintf(buf, "rcx = 0x%016lx   rdx = 0x%016lx\n", p.rcx, p.rdx);
     w << buf;
-    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", newRegs.rcx, newRegs.rdx);
+    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", n.rcx, n.rdx);
     w << buf;
-    sprintf(buf, "rdi = 0x%016lx   rsi = 0x%016lx\n", prevRegs.rdi, prevRegs.rsi);
+    sprintf(buf, "rdi = 0x%016lx   rsi = 0x%016lx\n", p.rdi, p.rsi);
     w << buf;
-    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", newRegs.rdi, newRegs.rsi);
+    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", n.rdi, n.rsi);
     w << buf;
-    sprintf(buf, "rbp = 0x%016lx   rsp = 0x%016lx\n", prevRegs.rbp, prevRegs.rsp);
+    sprintf(buf, "rbp = 0x%016lx   rsp = 0x%016lx\n", p.rbp, p.rsp);
     w << buf;
-    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", newRegs.rbp, newRegs.rsp);
+    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", n.rbp, n.rsp);
     w << buf;
-    sprintf(buf, "r8  = 0x%016lx   r9  = 0x%016lx\n", prevRegs.r8, prevRegs.r9);
+    sprintf(buf, "r8  = 0x%016lx   r9  = 0x%016lx\n", p.r8, p.r9);
     w << buf;
-    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", newRegs.r8, newRegs.r9);
+    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", n.r8, n.r9);
     w << buf;
-    sprintf(buf, "r10 = 0x%016lx   r11 = 0x%016lx\n", prevRegs.r10, prevRegs.r11);
+    sprintf(buf, "r10 = 0x%016lx   r11 = 0x%016lx\n", p.r10, p.r11);
     w << buf;
-    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", newRegs.r10, newRegs.r11);
+    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", n.r10, n.r11);
     w << buf;
-    sprintf(buf, "r12 = 0x%016lx   r13 = 0x%016lx\n", prevRegs.r12, prevRegs.r13);
+    sprintf(buf, "r12 = 0x%016lx   r13 = 0x%016lx\n", p.r12, p.r13);
     w << buf;
-    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", newRegs.r12, newRegs.r13);
+    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", n.r12, n.r13);
     w << buf;
-    sprintf(buf, "r14 = 0x%016lx   r15 = 0x%016lx\n", prevRegs.r14, prevRegs.r15);
+    sprintf(buf, "r14 = 0x%016lx   r15 = 0x%016lx\n", p.r14, p.r15);
     w << buf;
-    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", newRegs.r14, newRegs.r15);
+    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", n.r14, n.r15);
     w << buf;
-    sprintf(buf, "rip = 0x%016lx   rfl = 0x%016lx\n", prevRegs.rip, prevRegs.rflags);
+    sprintf(buf, "rip = 0x%016lx   rfl = 0x%016lx\n", p.rip, p.rflags);
     w << buf;
-    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", newRegs.rip, newRegs.rflags);
-    w << buf;
-    w << "\n";
-    sprintf(buf, "cs = 0x%04x                ds = 0x%04x\n", prevRegs.cs, prevRegs.ds);
-    w << buf;
-    sprintf(buf, " +-> 0x%04x                 +-> 0x%04x\n", newRegs.cs, newRegs.ds);
-    w << buf;
-    sprintf(buf, "es = 0x%04x                fs = 0x%04x\n", prevRegs.es, prevRegs.fs);
-    w << buf;
-    sprintf(buf, " +-> 0x%04x                 +-> 0x%04x\n", newRegs.es, newRegs.fs);
-    w << buf;
-    sprintf(buf, "gs = 0x%04x                ss = 0x%04x\n", prevRegs.gs, prevRegs.ss);
-    w << buf;
-    sprintf(buf, " +-> 0x%04x                 +-> 0x%04x\n", newRegs.gs, newRegs.ss);
+    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", n.rip, n.rflags);
     w << buf;
     w << "\n";
-    sprintf(buf, "cr0 = 0x%016lx   cr2 = 0x%016lx\n", prevRegs.cr0, prevRegs.cr2);
+    sprintf(buf, "cs = 0x%04x                ds = 0x%04x\n", p.cs, p.ds);
     w << buf;
-    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", newRegs.cr0, newRegs.cr2);
+    sprintf(buf, " +-> 0x%04x                 +-> 0x%04x\n", n.cs, n.ds);
     w << buf;
-    sprintf(buf, "cr3 = 0x%016lx   cr4 = 0x%016lx\n", prevRegs.cr3, prevRegs.cr4);
+    sprintf(buf, "es = 0x%04x                fs = 0x%04x\n", p.es, p.fs);
     w << buf;
-    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", newRegs.cr3, newRegs.cr4);
+    sprintf(buf, " +-> 0x%04x                 +-> 0x%04x\n", n.es, n.fs);
     w << buf;
-    sprintf(buf, "cr8 = 0x%016lx  efer = 0x%016lx\n", prevRegs.cr8, prevRegs.efer);
+    sprintf(buf, "gs = 0x%04x                ss = 0x%04x\n", p.gs, p.ss);
     w << buf;
-    sprintf(buf, " +--> 0x%016lx   +---> 0x%016lx\n", newRegs.cr8, newRegs.efer);
+    sprintf(buf, " +-> 0x%04x                 +-> 0x%04x\n", n.gs, n.ss);
     w << buf;
     w << "\n";
-    sprintf(buf, "idt: base = 0x%016lx   limit = 0x%08x\n", prevRegs.idt.base, prevRegs.idt.limit);
+    sprintf(buf, "cr0 = 0x%016lx   cr2 = 0x%016lx\n", p.cr0, p.cr2);
     w << buf;
-    sprintf(buf, " +-> base = 0x%016lx   limit = 0x%08x\n", newRegs.idt.base, newRegs.idt.limit);
+    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", n.cr0, n.cr2);
     w << buf;
-    sprintf(buf, "gdt: base = 0x%016lx   limit = 0x%08x\n", prevRegs.gdt.base, prevRegs.gdt.limit);
+    sprintf(buf, "cr3 = 0x%016lx   cr4 = 0x%016lx\n", p.cr3, p.cr4);
     w << buf;
-    sprintf(buf, " +-> base = 0x%016lx   limit = 0x%08x\n", newRegs.gdt.base, newRegs.gdt.limit);
+    sprintf(buf, " +--> 0x%016lx    +--> 0x%016lx\n", n.cr3, n.cr4);
+    w << buf;
+    sprintf(buf, "cr8 = 0x%016lx  efer = 0x%016lx\n", p.cr8, p.efer);
+    w << buf;
+    sprintf(buf, " +--> 0x%016lx   +---> 0x%016lx\n", n.cr8, n.efer);
+    w << buf;
+    w << "\n";
+    sprintf(buf,
+            "idt: base = 0x%016lx   limit = 0x%08x\n",
+            p.idt.base,
+            p.idt.limit);
+    w << buf;
+    sprintf(buf,
+            " +-> base = 0x%016lx   limit = 0x%08x\n",
+            n.idt.base,
+            n.idt.limit);
+    w << buf;
+    sprintf(buf,
+            "gdt: base = 0x%016lx   limit = 0x%08x\n",
+            p.gdt.base,
+            p.gdt.limit);
+    w << buf;
+    sprintf(buf,
+            " +-> base = 0x%016lx   limit = 0x%08x\n",
+            n.gdt.base,
+            n.gdt.limit);
     w << buf;
 }
 
@@ -178,55 +193,55 @@ void Tui::refresh() {
 
 Tui::Window::Window(u32 const height, u32 const width, std::string const& title)
     :
-    borderWin(::newwin(height, width, defaultPosY, defaultPosX)),
-    win(::newwin(height-(innerPadY*2),width-(innerPadX*2),innerPadY,innerPadX)),
-    title(std::string(" ") + title + " "),
-    height(height) {
+    m_borderWin(::newwin(height, width, defaultPosY, defaultPosX)),
+    m_win(::newwin(height-innerPadY*2,width-innerPadX*2,innerPadY,innerPadX)),
+    m_title(std::string(" ") + title + " "),
+    m_height(height) {
     // Enable keypad on the (inner) window in order to capture function keys.
-    ::keypad(win, true);
+    ::keypad(m_win, true);
     // Prepare the border window and add the title to it.
-    ::wborder(borderWin, '|', '|', '-', '-', '+', '+', '+', '+');
-    ::mvwprintw(borderWin, 0, titleOffset, "%s", this->title.c_str());
-    ::leaveok(win, true);
+    ::wborder(m_borderWin, '|', '|', '-', '-', '+', '+', '+', '+');
+    ::mvwprintw(m_borderWin, 0, titleOffset, "%s", m_title.c_str());
+    ::leaveok(m_win, true);
 }
 
 Tui::Window::~Window() {
-    ::delwin(win);
-    ::delwin(borderWin);
+    ::delwin(m_win);
+    ::delwin(m_borderWin);
 }
 
 void Tui::Window::move(u32 const y, u32 const x) {
-    ::mvwin(borderWin, y, x);
-    ::mvwin(win, y + innerPadY, x + innerPadX);
-    ::wrefresh(borderWin);
-    ::wrefresh(win);
+    ::mvwin(m_borderWin, y, x);
+    ::mvwin(m_win, y + innerPadY, x + innerPadX);
+    ::wrefresh(m_borderWin);
+    ::wrefresh(m_win);
 }
 
 void Tui::Window::refresh() {
     // Only refresh the inner window here, this is because refreshing the
-    // borderWin will overwrite the content of the inner window. The borderWin
-    // is only meant to be refreshed when moved.
-    ::wrefresh(win);
+    // m_borderWin will overwrite the content of the inner window. The
+    // m_borderWin is only meant to be refreshed when moved.
+    ::wrefresh(m_win);
 }
 
 void Tui::Window::clearAndResetCursor() {
-    ::werase(win);
-    wmove(win, 0, 0);
+    ::werase(m_win);
+    wmove(m_win, 0, 0);
 }
 
 Tui::Window& Tui::Window::operator<<(char const * const str) {
-    ::wprintw(win, "%s", str);
+    ::wprintw(m_win, "%s", str);
     return *this;
 }
 
 int Tui::Window::getChar() {
-    return ::wgetch(win);
+    return ::wgetch(m_win);
 }
 
 void Tui::Window::enableScrolling(bool const enabled) {
-    ::scrollok(win, enabled);
+    ::scrollok(m_win, enabled);
     if (enabled) {
-        ::wsetscrreg(win, 0, height);
+        ::wsetscrreg(m_win, 0, m_height);
     }
 }
 }

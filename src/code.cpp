@@ -7,34 +7,34 @@
 
 namespace X86Lab {
 
-Code::Code(std::string const& filePath) : file(filePath) {
+Code::Code(std::string const& filePath) : m_file(filePath) {
     std::tuple<std::unique_ptr<u8>,
                u64,
                std::unique_ptr<Assembler::InstructionMap const>>
     assemblerOutput(X86Lab::Assembler::invoke(filePath));
 
-    code = std::move(std::get<0>(assemblerOutput));
-    codeSize = std::get<1>(assemblerOutput);
-    map = std::move(std::get<2>(assemblerOutput));
+    m_code = std::move(std::get<0>(assemblerOutput));
+    m_codeSize = std::get<1>(assemblerOutput);
+    m_map = std::move(std::get<2>(assemblerOutput));
 }
 
 u8 const* Code::machineCode() const {
-    return code.get();
+    return m_code.get();
 }
 
 u64 Code::size() const {
-    return codeSize;
+    return m_codeSize;
 }
 
 u64 Code::offsetToLine(u64 const offset) const {
-    if (!map->contains(offset)) {
+    if (!m_map->contains(offset)) {
         return 0;
     } else {
-        return map->at(offset);
+        return m_map->at(offset);
     }
 }
 
 std::string const& Code::fileName() const {
-    return file;
+    return m_file;
 }
 }

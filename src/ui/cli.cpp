@@ -2,7 +2,7 @@
 
 namespace X86Lab::Ui {
 Action Cli::doWaitForNextAction() {
-    if (isVmRunnable) {
+    if (m_isVmRunnable) {
         return Action::Step;
     } else {
         return Action::Quit;
@@ -42,7 +42,7 @@ void Cli::doUpdate(State const& newState) {
         std::cout << "Line        = ?" << std::endl;
     }
 
-    isVmRunnable = newState.isVmRunnable();
+    m_isVmRunnable = newState.isVmRunnable();
 }
 
 void Cli::doLog(std::string const& msg) {

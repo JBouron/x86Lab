@@ -8,16 +8,16 @@ namespace X86Lab::Ui {
 State::State(Vm::OperatingState const runState,
              std::shared_ptr<Code const> const code,
              std::shared_ptr<Snapshot const> const snapshot) :
-    runState(runState), 
-    loadedCode(code),
-    latestSnapshot(snapshot) {}
+    m_runState(runState), 
+    m_loadedCode(code),
+    m_latestSnapshot(snapshot) {}
 
 bool State::isVmRunnable() const {
-    return runState == Vm::OperatingState::Runnable;
+    return m_runState == Vm::OperatingState::Runnable;
 }
 
 std::string const& State::sourceFileName() const {
-    return loadedCode->fileName();
+    return m_loadedCode->fileName();
 }
 
 u64 State::currentLine() const {
@@ -25,16 +25,16 @@ u64 State::currentLine() const {
 }
 
 u64 State::mapToLine(u64 const address) const {
-    return loadedCode->offsetToLine(address);
+    return m_loadedCode->offsetToLine(address);
 }
 
 Snapshot::Registers const& State::registers() const {
-    return latestSnapshot->registers();
+    return m_latestSnapshot->registers();
 }
 
 Snapshot::Registers State::prevRegisters() const {
-    if (latestSnapshot->hasBase()) {
-        return latestSnapshot->base()->registers();
+    if (m_latestSnapshot->hasBase()) {
+        return m_latestSnapshot->base()->registers();
     } else {
         return Snapshot::Registers({},{});
     }

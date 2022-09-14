@@ -22,20 +22,20 @@ public:
     void run();
 
 private:
-    std::shared_ptr<Vm> vm;
-    std::shared_ptr<Code const> code;
-    std::shared_ptr<Ui::Backend> ui;
+    std::shared_ptr<Vm> m_vm;
+    std::shared_ptr<Code const> m_code;
+    std::shared_ptr<Ui::Backend> m_ui;
 
     // The full execution history. This vector contains the snapshots of the Vm
     // after each instruction/step in-order. Entry i points to the snapshot
     // after executing the ith instruction. Entry 0 is the initial condition of
     // the VM.
     // This vector is used to implement reverse stepping in an efficient way.
-    std::vector<std::shared_ptr<Snapshot>> history;
+    std::vector<std::shared_ptr<Snapshot>> m_history;
 
     // This is the index of the currently shown state in the history. If this
     // index == history.size() then this is the lastest state of the VM.
-    u64 historyIndex;
+    u64 m_historyIndex;
 
     // Update the UI with the latest state of the VM.
     void updateUi();

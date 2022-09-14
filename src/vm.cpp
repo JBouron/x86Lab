@@ -22,34 +22,34 @@ Vm::State::Registers::Registers(kvm_regs const& regs, kvm_sregs const& sregs) :
     gdt({.base = sregs.gdt.base, .limit = sregs.gdt.limit}) {}
 
 Vm::State::Registers const& Vm::State::registers() const {
-    return regs;
+    return m_regs;
 }
 
 Vm::State::Memory const& Vm::State::memory() const {
-    return mem;
+    return m_mem;
 }
 
 Vm::State::State(Registers const& regs, Memory && mem) :
-    regs(regs),
-    mem(std::move(mem)) {}
+    m_regs(regs),
+    m_mem(std::move(mem)) {}
 
 Vm::Vm(CpuMode const startMode, u64 const memorySize) :
-    vmFd(Util::Kvm::createVm()),
-    vcpuFd(Util::Kvm::createVcpu(vmFd)),
-    kvmRun(Util::Kvm::getVcpuRunStruct(vcpuFd)),
-    physicalMemorySize(memorySize * PAGE_SIZE),
-    memory(std::get<0>(addPhysicalMemory(memorySize))),
-    currState(OperatingState::NoCodeLoaded)
+    m_vmFd(Util::Kvm::createVm()),
+    m_vcpuFd(Util::Kvm::createVcpu(m_vmFd)),
+    m_kvmRun(Util::Kvm::getVcpuRunStruct(m_vcpuFd)),
+    m_physicalMemorySize(memorySize * PAGE_SIZE),
+    m_memory(std::get<0>(addPhysicalMemory(memorySize))),
+    m_currState(OperatingState::NoCodeLoaded)
     {
     // Disable any MSR access filtering. KVM's doc indicate that if this is not
     // done then the default behaviour is used. However it's not really clear if
     // the default behaviour allows access to MSRs or not. Hence disable it here
     // completely.
-    Util::Kvm::disableMsrFiltering(vmFd);
+    Util::Kvm::disableMsrFiltering(m_vmFd);
 
     // Setup access to CPUID information. We don't want to "hide" anything from
     // the guest, having CPUID instruction available can always be useful.
-    Util::Kvm::setupCpuid(vcpuFd);
+    Util::Kvm::setupCpuid(m_vcpuFd);
 
     // Setup the registers depending on the requested mode and honor the initial
     // value of registers documented in .hpp.
@@ -57,17 +57,17 @@ Vm::Vm(CpuMode const startMode, u64 const memorySize) :
 }
 
 Vm::~Vm() {
-    // FIXME: The kvm_run structure is an mmap on the vcpuFd. Unmap it before
-    // closing the vcpuFd. This could be solved using a custom type returned by
-    // getVcpuRunStruct, with RAII doing the munmap in its destructor.
-    if (::close(vcpuFd) == -1) {
+    // FIXME: The kvm_run structure is an mmap on the m_vcpuFd. Unmap it before
+    // closing the m_vcpuFd. This could be solved using a custom type returned
+    // by getVcpuRunStruct, with RAII doing the munmap in its destructor.
+    if (::close(m_vcpuFd) == -1) {
         std::perror("Cannot close KVM Vcpu file descriptor:");
-    } else if (::close(vmFd) == -1) {
+    } else if (::close(m_vmFd) == -1) {
         std::perror("Cannot close KVM VM file descriptor:");
     }
 
     // Un-map all physical memory.
-    for (kvm_userspace_memory_region const& region : memorySlots) {
+    for (kvm_userspace_memory_region const& region : m_memorySlots) {
         void * const addr(reinterpret_cast<void*>(region.userspace_addr));
         u64 const len(region.memory_size);
         if (::munmap(addr, len) == -1) {
@@ -79,32 +79,32 @@ Vm::~Vm() {
 
 void Vm::loadCode(Code const& code) {
     // For now the code is always loaded at address 0x0.
-    std::memcpy(memory, code.machineCode(), code.size());
+    std::memcpy(m_memory, code.machineCode(), code.size());
 
     State::Registers regs(getRegisters());
     // Set RIP to first instruction.
     regs.rip = 0x0;
     // Set RSP to point after the end of physical memory.
-    regs.rsp = physicalMemorySize;
+    regs.rsp = m_physicalMemorySize;
     setRegisters(regs);
 
     // The KVM is now runnable.
-    currState = OperatingState::Runnable;
+    m_currState = OperatingState::Runnable;
 }
 
 std::unique_ptr<Vm::State> Vm::getState() const {
     State::Registers const regs(getRegisters());
     Vm::State::Memory mem({
-        .data = std::unique_ptr<u8[]>(new u8[physicalMemorySize]),
-        .size = physicalMemorySize,
+        .data = std::unique_ptr<u8[]>(new u8[m_physicalMemorySize]),
+        .size = m_physicalMemorySize,
     });
-    std::memcpy(mem.data.get(), memory, physicalMemorySize);
+    std::memcpy(mem.data.get(), m_memory, m_physicalMemorySize);
     return std::unique_ptr<Vm::State>(new Vm::State(regs, std::move(mem)));
 }
 
 Vm::State::Registers Vm::getRegisters() const {
-    kvm_regs const regs(Util::Kvm::getRegs(vcpuFd));
-    kvm_sregs const sregs(Util::Kvm::getSRegs(vcpuFd));
+    kvm_regs const regs(Util::Kvm::getRegs(m_vcpuFd));
+    kvm_sregs const sregs(Util::Kvm::getSRegs(m_vcpuFd));
     return State::Registers(regs, sregs);
 }
 
@@ -120,12 +120,12 @@ void Vm::setRegisters(State::Registers const& registerValues) {
         .r14    = registerValues.r14, .r15    = registerValues.r15,
         .rip    = registerValues.rip, .rflags = registerValues.rflags,
     });
-    Util::Kvm::setRegs(vcpuFd, regs);
+    Util::Kvm::setRegs(m_vcpuFd, regs);
 
     // State::Registers doesn't quite contain all the values that kvm_sregs has.
     // Hence for those missing values, we read the current kvm_sregs to re-use
     // them in the call to KVM_SET_SREGS.
-    kvm_sregs sregs(Util::Kvm::getSRegs(vcpuFd));
+    kvm_sregs sregs(Util::Kvm::getSRegs(m_vcpuFd));
 
     // Set the control registers, efer and the IDT/GDT. Segment registers are
     // left untouched since setting those using setRegisters is not supported.
@@ -140,11 +140,11 @@ void Vm::setRegisters(State::Registers const& registerValues) {
     sregs.gdt.base = registerValues.gdt.base;
     sregs.gdt.limit = registerValues.gdt.limit;
 
-    Util::Kvm::setSRegs(vcpuFd, sregs);
+    Util::Kvm::setSRegs(m_vcpuFd, sregs);
 }
 
 Vm::OperatingState Vm::operatingState() const {
-    return currState;
+    return m_currState;
 }
 
 Vm::OperatingState Vm::step() {
@@ -155,30 +155,30 @@ Vm::OperatingState Vm::step() {
     // KVM_SET_REGS. Hence do it right before the call to KVM_RUN.
     kvm_guest_debug dbg;
     dbg.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_SINGLESTEP;
-    if (::ioctl(vcpuFd, KVM_SET_GUEST_DEBUG, &dbg) == -1) {
-        currState = OperatingState::SingleStepError;
+    if (::ioctl(m_vcpuFd, KVM_SET_GUEST_DEBUG, &dbg) == -1) {
+        m_currState = OperatingState::SingleStepError;
         throw KvmError("Cannot set guest debug", errno);
     }
 
-    if (::ioctl(vcpuFd, KVM_RUN, NULL) != 0) {
-        currState = OperatingState::SingleStepError;
+    if (::ioctl(m_vcpuFd, KVM_RUN, NULL) != 0) {
+        m_currState = OperatingState::SingleStepError;
         throw KvmError("Cannot run VM", errno);
     }
 
-    if (kvmRun.exit_reason == KVM_EXIT_DEBUG) {
+    if (m_kvmRun.exit_reason == KVM_EXIT_DEBUG) {
         // The execution stopped after one step, we are still runnable.
-        currState = OperatingState::Runnable;
-    } else if (kvmRun.exit_reason == KVM_EXIT_SHUTDOWN) {
+        m_currState = OperatingState::Runnable;
+    } else if (m_kvmRun.exit_reason == KVM_EXIT_SHUTDOWN) {
         // Execution stopped the host. This is most likely a triple-fault hehe.
-        currState = OperatingState::Shutdown;
-    } else if (kvmRun.exit_reason == KVM_EXIT_HLT) {
+        m_currState = OperatingState::Shutdown;
+    } else if (m_kvmRun.exit_reason == KVM_EXIT_HLT) {
         // The single step executed a halt instruction.
-        currState = OperatingState::Halted;
+        m_currState = OperatingState::Halted;
     } else {
         // For now consider everything else as an error.
-        currState = OperatingState::SingleStepError;
+        m_currState = OperatingState::SingleStepError;
     }
-    return currState;
+    return m_currState;
 }
 
 // See computeSegmentRegister.
@@ -307,7 +307,7 @@ static kvm_segment computeSegmentRegister(Vm::CpuMode const mode,
 }
 
 void Vm::setRegistersInitialValue(CpuMode const mode) {
-    kvm_sregs sregs(Util::Kvm::getSRegs(vcpuFd));
+    kvm_sregs sregs(Util::Kvm::getSRegs(m_vcpuFd));
 
     // Setup the control registers for the requested cpu mode.
     enableCpuMode(sregs, mode);
@@ -340,7 +340,7 @@ void Vm::setRegistersInitialValue(CpuMode const mode) {
     sregs.tr.limit = 0x0;
     sregs.tr.g = 0;
 
-    Util::Kvm::setSRegs(vcpuFd, sregs);
+    Util::Kvm::setSRegs(m_vcpuFd, sregs);
 
     // Honor the documented initial values of the registers. Don't touch the
     // segment registers as those have been set when enabling the requested cpu
@@ -500,14 +500,14 @@ u64 Vm::createIdentityMapping() {
     assert(!(guestPml4 % PAGE_SIZE));
 
     // Map each physical frame.
-    for (u64 offset(0); offset < physicalMemorySize; offset += PAGE_SIZE) {
+    for (u64 offset(0); offset < m_physicalMemorySize; offset += PAGE_SIZE) {
         map(offset, hostPml4, 4);
     }
     return guestPml4;
 }
 
 std::pair<void*, u64> Vm::addPhysicalMemory(u32 const numPages) {
-    if (memorySlots.size() == Util::Kvm::getMaxMemSlots(vmFd)) {
+    if (m_memorySlots.size() == Util::Kvm::getMaxMemSlots(m_vmFd)) {
         // We are already using as many slots as we can. Note this will most
         // likely never happen as KVM reports 32k slots on most machines.
         throw KvmError("Reached max. number of memory slots on VM", 0);
@@ -519,16 +519,16 @@ std::pair<void*, u64> Vm::addPhysicalMemory(u32 const numPages) {
     int const prot(PROT_READ | PROT_WRITE);
     int const flags(MAP_PRIVATE | MAP_ANONYMOUS);
     void * const userspace(::mmap(NULL, allocSize, prot, flags, -1, 0));
-    if (memory == MAP_FAILED) {
+    if (userspace == MAP_FAILED) {
         throw MmapError("Failed to mmap memory for guest", errno);
     }
 
     // Zero the allocated memory area.
     std::memset(userspace, 0x0, allocSize);
 
-    u32 const numSlots(memorySlots.size());
+    u32 const numSlots(m_memorySlots.size());
     kvm_userspace_memory_region const lastSlot(
-        (!!numSlots) ? memorySlots[numSlots-1] : kvm_userspace_memory_region{});
+        !!numSlots ? m_memorySlots[numSlots-1] : kvm_userspace_memory_region{});
 
     // The physical address of the new slot starts immediately after the last
     // slot.
@@ -536,17 +536,17 @@ std::pair<void*, u64> Vm::addPhysicalMemory(u32 const numPages) {
 
     // Then map the memory to the guest.
     kvm_userspace_memory_region const kvmMap({
-        .slot = static_cast<u32>(memorySlots.size()),
+        .slot = static_cast<u32>(m_memorySlots.size()),
         .flags = 0,
         .guest_phys_addr = phyAddr,
         .memory_size = allocSize,
         .userspace_addr = reinterpret_cast<u64>(userspace),
     });
-    if (::ioctl(vmFd, KVM_SET_USER_MEMORY_REGION, &kvmMap) == -1) {
+    if (::ioctl(m_vmFd, KVM_SET_USER_MEMORY_REGION, &kvmMap) == -1) {
         throw KvmError("Failed to map memory to guest", errno);
     }
     // Adding the slot was successful, add it to the vector.
-    memorySlots.push_back(kvmMap);
+    m_memorySlots.push_back(kvmMap);
     return std::pair<void*, u64>(userspace, phyAddr);
 }
 }

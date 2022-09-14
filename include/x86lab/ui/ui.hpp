@@ -63,9 +63,9 @@ public:
     Snapshot::Registers prevRegisters() const;
 
 private:
-    Vm::OperatingState runState;
-    std::shared_ptr<Code const> loadedCode;
-    std::shared_ptr<Snapshot const> const latestSnapshot;
+    Vm::OperatingState m_runState;
+    std::shared_ptr<Code const> m_loadedCode;
+    std::shared_ptr<Snapshot const> const m_latestSnapshot;
 };
 
 // Backend implementation of the user interface. This is meant to be derived in

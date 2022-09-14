@@ -428,9 +428,9 @@ DECLARE_TEST(testReadSegmentRegisters) {
     )");
     // Notice the nop after the mov to SS. This is needed because moving to SS
     // inhibits the interrupts until after the next instruction has executed.
-    // Hence, if we are to call vm->step() on the "mov  ss, ax", we would in fact
-    // run two instrutions. Without the nop this would run the mov and the hlt,
-    // leaving the VM in a non-runnable operatingState.
+    // Hence, if we are to call vm->step() on the "mov  ss, ax", we would in
+    // fact run two instrutions. Without the nop this would run the mov and the
+    // hlt, leaving the VM in a non-runnable operatingState.
     std::unique_ptr<X86Lab::Vm> const vm(
         createVmAndLoadCode(X86Lab::Vm::CpuMode::RealMode, assembly));
 
@@ -708,20 +708,21 @@ DECLARE_TEST(test64BitIdentityMapping) {
         createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly, memSize));
 
     for (u64 i(0); i < memSize; ++i) {
-        u64 const writeOffset(i * X86Lab::PAGE_SIZE);
+        u64 const writeOff(i * X86Lab::PAGE_SIZE);
         // Reset the registers to point to the mov instruction with the correct
         // address in RAX.
         X86Lab::Vm::State::Registers regs(vm->getRegisters());
         regs.rip = 0x8;
         regs.rcx = 0xDEADBEEFCAFEBABEULL;
-        regs.rax = writeOffset;
+        regs.rax = writeOff;
         vm->setRegisters(regs);
 
         // Run the mov.
         TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
 
         std::unique_ptr<X86Lab::Vm::State> const state(vm->getState());
-        u64 const read(*(reinterpret_cast<u64*>(state->memory().data.get() + writeOffset)));
+        u64 const read(
+            *(reinterpret_cast<u64*>(state->memory().data.get() + writeOff)));
         TEST_ASSERT(read == regs.rcx);
     }
 }

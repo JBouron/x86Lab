@@ -21,7 +21,9 @@ public:
     // @param size: The size of the memory.
     BlockTree(std::shared_ptr<BlockTree> const base,
               u8 const * const data,
-              u64 const size) : memSize(size), root(build(base, data, size)) {}
+              u64 const size) :
+        m_memSize(size),
+        m_root(build(base, data, size)) {}
 
     // Read a buffer from the memory described by this tree.
     // @param offset: The offset at which to read from.
@@ -33,13 +35,13 @@ public:
     std::unique_ptr<u8> read(u64 const offset, u64 const size) const {
         std::unique_ptr<u8> buf(new u8[size]);
         std::memset(buf.get(), 0, size);
-        if (offset >= memSize) {
+        if (offset >= m_memSize) {
             // Nothing to read.
             return buf;
         }
 
-        u64 const toRead(std::min(size, memSize - offset));
-        root->read(buf.get(), offset, toRead);
+        u64 const toRead(std::min(size, m_memSize - offset));
+        m_root->read(buf.get(), offset, toRead);
         return buf;
     }
 
@@ -71,7 +73,7 @@ private:
         // @param data: The data for the range of memory. This pointer must be
         // `size` bytes long.
         Node(u64 const offset, u64 const size, std::shared_ptr<u8> const data) :
-            offset(offset), size(size), data(data) {}
+            m_offset(offset), m_size(size), m_data(data) {}
 
         // Create an intermediate node.
         // @param offset: The offset of the range of memory defined by that
@@ -89,13 +91,13 @@ private:
              u64 const size,
              std::shared_ptr<Node> const left,
              std::shared_ptr<Node> const right) :
-            offset(offset), size(size), left(left), right(right) {
+            m_offset(offset), m_size(size), m_left(left), m_right(right) {
             // Check invariants.
             assert(!!left&&!!right);
-            assert((left->size + right->size) == size);
-            assert(left->offset == offset);
-            assert(right->offset == left->offset + left->size);
-            assert(left->size == right->size);
+            assert((left->m_size + right->m_size) == m_size);
+            assert(left->m_offset == m_offset);
+            assert(right->m_offset == left->m_offset + left->m_size);
+            assert(left->m_size == right->m_size);
         }
 
         // Read part of the memory range described by this Node. If this is a
@@ -108,17 +110,17 @@ private:
         // @param len: The number of bytes to read.
         void read(u8 * const dest, u64 const relOff, u64 const len) const {
             // The requested range must fully lie within this node.
-            assert(len <= size);
+            assert(len <= m_size);
 
             if (isLeaf()) {
                 // This is a leaf node, the data is readily available, just copy
                 // it into dest and ret.
-                std::memcpy(dest, data.get() + relOff, len);
+                std::memcpy(dest, m_data.get() + relOff, len);
                 return;
             }
 
             // This is an intermediate, we need to recurse on each child.
-            u64 const middle(size / 2);
+            u64 const middle(m_size / 2);
             bool const recurseLeft(relOff < middle);
             bool const recurseRight(middle < relOff + len);
 
@@ -132,7 +134,7 @@ private:
                 u64 const leftLen(std::min(relOff + len, middle) - leftOff);
                 //  - Data stored on left child comes first, hence:
                 u8 * const leftPtr(dest);
-                left->read(leftPtr, leftOff, leftLen);
+                m_left->read(leftPtr, leftOff, leftLen);
             }
             if (recurseRight) {
                 // Read from the right child. Since right::offset !=
@@ -150,7 +152,7 @@ private:
                 // the requested data is fully contained in the right child and
                 // we simply write at dest.
                 u8 * const rightPtr(dest + (recurseLeft ? middle - relOff : 0));
-                right->read(rightPtr, rightOff, rightLen);
+                m_right->read(rightPtr, rightOff, rightLen);
             }
         }
 
@@ -158,41 +160,41 @@ private:
         // @return: true if this is a leaf node, false if it is an intermediate
         // node.
         bool isLeaf() const {
-            return !!data;
+            return !!m_data;
         }
 
         // Get a pointer on the left child node of this node.
         // @return: Pointer to the left child. nullptr if the current node is a
         // leaf node.
         std::shared_ptr<Node> leftNode() const {
-            return left;
+            return m_left;
         }
 
         // Get a pointer on the right child node of this node.
         // @return: Pointer to the right child. nullptr if the current node is a
         // leaf node.
         std::shared_ptr<Node> rightNode() const {
-            return right;
+            return m_right;
         }
 
     private:
         // Offset and size of the memory region covered by this node.
-        u64 offset;
-        u64 size;
+        u64 m_offset;
+        u64 m_size;
 
         // Left child. nullptr if this node is a leaf node.
-        std::shared_ptr<Node> left;
+        std::shared_ptr<Node> m_left;
         // Right child. nullptr if this node is a leaf node.
-        std::shared_ptr<Node> right;
+        std::shared_ptr<Node> m_right;
         // Data of this node. nullptr if this node is an intermediate node.
-        std::shared_ptr<u8> data;
+        std::shared_ptr<u8> m_data;
     };
 
     // Size of the memory described by this BlockTree.
-    u64 memSize;
+    u64 m_memSize;
 
     // Root node of the block tree.
-    std::shared_ptr<Node> root;
+    std::shared_ptr<Node> m_root;
 
     // Build a BlockTree from a base tree. This creates an optimized BlockTree
     // that re-uses nodes from the base tree if the memory ranges described by
@@ -254,7 +256,7 @@ private:
                     new Node(offset, size, recLeft, recRight));
             }
         });
-        return inner(!!base ? base->root : nullptr, 0, size);
+        return inner(!!base ? base->m_root : nullptr, 0, size);
     }
 };
 
@@ -263,26 +265,26 @@ Snapshot::Snapshot(std::unique_ptr<Vm::State> state) :
 
 Snapshot::Snapshot(std::shared_ptr<Snapshot> const base,
                    std::unique_ptr<Vm::State> state) :
-    baseSnapshot(base),
-    regs(state->registers()),
-    blockTree(new BlockTree(!!base ? base->blockTree : nullptr,
+    m_baseSnapshot(base),
+    m_regs(state->registers()),
+    m_blockTree(new BlockTree(!!base ? base->m_blockTree : nullptr,
                             state->memory().data.get(),
                             state->memory().size)) {}
 
 std::shared_ptr<Snapshot> Snapshot::base() const {
-    return baseSnapshot;
+    return m_baseSnapshot;
 }
 
 bool Snapshot::hasBase() const {
-    return baseSnapshot != nullptr;
+    return m_baseSnapshot != nullptr;
 }
 
 Snapshot::Registers const& Snapshot::registers() const {
-    return regs;
+    return m_regs;
 }
 
 std::unique_ptr<u8> Snapshot::readPhysicalMemory(u64 const offset,
                                                  u64 const size) const {
-    return blockTree->read(offset, size);
+    return m_blockTree->read(offset, size);
 }
 }

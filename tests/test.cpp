@@ -42,14 +42,14 @@ public:
     // Enqueue a test to be run.
     // @param test: The test to be enqueued.
     void addTest(Test const& test) {
-        tests.push_back(test);
+        m_tests.push_back(test);
     }
 
     // Run all the tests enqueued so far.
     void run() const {
-        std::cout << "Running " << tests.size() << " tests." << std::endl;
+        std::cout << "Running " << m_tests.size() << " tests." << std::endl;
         u32 numFail(0);
-        for (Test const& t : tests) {
+        for (Test const& t : m_tests) {
             try {
                 t.func();
                 std::cout << "[ OK ] " << t.name << std::endl;
@@ -62,13 +62,14 @@ public:
         if (!numFail) {
             std::cout << "All tests passed" << std::endl;
         } else {
-            std::cout << numFail << " / " << tests.size() << " tests failed\n";
+            std::cout << numFail << " / " << m_tests.size() << " tests failed";
+            std::cout << std::endl;
         }
     }
 
 private:
     // All the tests to be run.
-    std::vector<Test> tests;
+    std::vector<Test> m_tests;
 };
 
 

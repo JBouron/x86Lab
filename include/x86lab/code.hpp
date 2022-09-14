@@ -32,15 +32,15 @@ public:
 
 private:
     // Path to the source file.
-    std::string file;
+    std::string m_file;
 
     // Raw machine code.
-    std::shared_ptr<u8> code;
+    std::shared_ptr<u8> m_code;
 
     // Size in bytes of the raw machine code.
-    u64 codeSize;
+    u64 m_codeSize;
 
     // Map of instruction pointer to instruction / line numbers.
-    std::unique_ptr<Assembler::InstructionMap const> map;
+    std::unique_ptr<Assembler::InstructionMap const> m_map;
 };
 }

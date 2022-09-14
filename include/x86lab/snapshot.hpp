@@ -51,10 +51,10 @@ public:
 
 private:
     // The snapshot this snapshot is built on top of.
-    std::shared_ptr<Snapshot> baseSnapshot;
+    std::shared_ptr<Snapshot> m_baseSnapshot;
     // The value of all the register at that snapshot.
-    Vm::State::Registers regs;
+    Vm::State::Registers m_regs;
     // Underlying BlockTree holding the snapshot of memory.
-    std::shared_ptr<BlockTree> blockTree;
+    std::shared_ptr<BlockTree> m_blockTree;
 };
 }

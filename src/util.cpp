@@ -66,8 +66,10 @@ void setupCpuid(int const vcpuFd) {
     // FIXME: We should somehow guess what this number should be. Maybe by
     // repeatedly calling the ioctl and increasing it every time it fails?
     size_t const nent(64);
-    size_t const structSize(sizeof(kvm_cpuid2) + nent * sizeof(kvm_cpuid_entry2));
-    kvm_cpuid2 * const kvmCpuid(reinterpret_cast<kvm_cpuid2*>(malloc(structSize)));
+    size_t const structSize(
+        sizeof(kvm_cpuid2) + nent * sizeof(kvm_cpuid_entry2));
+    kvm_cpuid2 * const kvmCpuid(
+        reinterpret_cast<kvm_cpuid2*>(malloc(structSize)));
     std::memset(kvmCpuid, 0x0, structSize);
     assert(!!kvmCpuid);
     kvmCpuid->nent = nent;

@@ -20,6 +20,6 @@ private:
     // True if the last call to update indicated that the VM was still runnable.
     // This is used to know when to terminate and send an Action::Quit in the
     // next call to doWaitForNextAction.
-    bool isVmRunnable{true};
+    bool m_isVmRunnable{true};
 };
 }

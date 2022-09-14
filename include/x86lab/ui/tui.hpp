@@ -102,13 +102,13 @@ private:
         // that they are part of the window's content. This is undesirable as
         // printing content in the window will overwrite the border. Hence use a
         // second window as the "border".
-        WINDOW* borderWin;
-        WINDOW* win;
+        WINDOW* m_borderWin;
+        WINDOW* m_win;
 
         // Title of the window.
-        std::string title;
+        std::string m_title;
         // Height and width of the window in rows and cols respectively.
-        u32 height;
+        u32 m_height;
     };
 
     // Ncurses only need to be initialized once. In the event that we have two

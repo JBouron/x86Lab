@@ -82,8 +82,8 @@ public:
         State(Registers const& regs, Memory && mem);
 
     private:
-        Registers regs;
-        Memory mem;
+        Registers m_regs;
+        Memory m_mem;
     };
 
     // The supported CPU modes to start the Vm in. This indirectly controls the
@@ -149,8 +149,8 @@ public:
     std::unique_ptr<Vm::State> getState() const;
 
     // Get the current values of the registers on the vCpu.
-    // @return: A complete State::Registers holding the values of the register as of
-    // the time after the last instruction was executed.
+    // @return: A complete State::Registers holding the values of the register
+    // as of the time after the last instruction was executed.
     State::Registers getRegisters() const;
 
     // Set the values of the registers on the vCpu. For now, setting segment
@@ -220,20 +220,20 @@ private:
     std::pair<void*, u64> addPhysicalMemory(u32 const numPages);
 
     // File descriptor for the KVM.
-    int const vmFd;
+    int const m_vmFd;
     // File descriptor for the vCpu.
-    int const vcpuFd;
+    int const m_vcpuFd;
     // Reference to the kvm_run structure associated with the vCpu. For now we
     // only read the kvm_run structure to get information on the exit reason,
     // hence use const reference.
-    kvm_run const& kvmRun;
+    kvm_run const& m_kvmRun;
     // The size of the guest's physical memory in bytes.
-    size_t physicalMemorySize;
+    size_t m_physicalMemorySize;
     // Description of all the memory slots of this VM.
-    std::vector<kvm_userspace_memory_region> memorySlots;
+    std::vector<kvm_userspace_memory_region> m_memorySlots;
     // Pointer to start of physical memory on the host (e.g. userspace).
-    void *memory;
+    void *m_memory;
     // The current OperatingState of the KVM.
-    OperatingState currState;
+    OperatingState m_currState;
 };
 }
