@@ -16,9 +16,12 @@ all: x86lab
 # their %.o with the correct deps.
 # For each cpp file this output a line of the form:
 # 	foo.o: foo.cpp bar.hpp baz.hpp ...
-.deps: $(CPP_FILES)
+.deps: $(CPP_FILES) $(TEST_CPP_FILES)
 	for f in $(CPP_FILES); do \
-		$(CXX) $(CXXFLAGS) -MM $$f; \
+		$(CXX) $(CXXFLAGS) -MM $$f -MT $${f/cpp/o}; \
+	done >> $@
+	for f in $(TEST_CPP_FILES); do \
+		$(CXX) $(CXXFLAGS) -Itests/include/ -MM $$f -MT $${f/cpp/o}; \
 	done >> $@
 # Include the deps computed above.
 include .deps
@@ -28,6 +31,7 @@ x86lab: main.o $(OBJ_FILES)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
 
 # Tests.
+.PHONY: test
 test: CXXFLAGS += -Itests/include/
 test: x86labTests
 	./x86labTests
