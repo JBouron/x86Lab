@@ -61,6 +61,9 @@ public:
             u64 mm6;
             u64 mm7;
 
+            // XMM registers.
+            u128 xmm[16];
+
             // TODO: Include floating point registers.
 
             // Build a Registers from KVM's data structures.

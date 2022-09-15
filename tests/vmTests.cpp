@@ -635,6 +635,16 @@ DECLARE_TEST(testSetRegisters) {
     expected.mm6 = 0x0707070707070707;
     expected.mm7 = 0x0808080808080808;
 
+    // XMM registers. Just some arbitrary patterns/values.
+    for (u8 i(0); i < 16; ++i) {
+        u64 const high(0x1111111111111111ULL * i);
+        u64 const low(~high);
+        u128 val(high);
+        val <<= 64;
+        val |= low;
+        expected.xmm[0] = val;
+    }
+
     // Set the registers on the VM.
     vm->setRegisters(expected);
 
@@ -813,8 +823,8 @@ DECLARE_TEST(testReadMemory) {
     checkMem(regs.rax);
 }
 
-// Test reading the floating point registers.
-DECLARE_TEST(testReadFpu) {
+// Test reading the MMX registers from Vm::getRegisters().
+DECLARE_TEST(testReadMmxRegisters) {
     std::string const assembly(R"(
         BITS 64
         xor     rax, rax
@@ -932,5 +942,94 @@ DECLARE_TEST(testMmxInstruction) {
 
     u64 const mm0(vm->getRegisters().mm0);
     TEST_ASSERT(mm0 == expected);
+}
+
+DECLARE_TEST(testReadXmmRegisters) {
+    std::string const assembly(R"(
+        BITS 64
+        
+        ; Push two double-quadword onto the stack, to be loaded in xmm
+        ; registers, one 0 (rsp + 16) and another with an arbitrary value (rsp).
+        xor     rax, rax
+        push    rax
+        push    rax
+        mov     rax, 0xDEADBEEFCAFEBABE
+        push    rax
+        mov     rax, 0xF00F1337CA7D0516
+        push    rax
+
+        movups  xmm0, [rsp] 
+        movups  xmm0, [rsp + 16] 
+        movups  xmm1, [rsp] 
+        movups  xmm1, [rsp + 16] 
+        movups  xmm2, [rsp] 
+        movups  xmm2, [rsp + 16] 
+        movups  xmm3, [rsp] 
+        movups  xmm3, [rsp + 16] 
+        movups  xmm4, [rsp] 
+        movups  xmm4, [rsp + 16] 
+        movups  xmm5, [rsp] 
+        movups  xmm5, [rsp + 16] 
+        movups  xmm6, [rsp] 
+        movups  xmm6, [rsp + 16] 
+        movups  xmm7, [rsp] 
+        movups  xmm7, [rsp + 16] 
+        movups  xmm8, [rsp] 
+        movups  xmm8, [rsp + 16] 
+        movups  xmm9, [rsp] 
+        movups  xmm9, [rsp + 16] 
+        movups  xmm10, [rsp] 
+        movups  xmm10, [rsp + 16] 
+        movups  xmm11, [rsp] 
+        movups  xmm11, [rsp + 16] 
+        movups  xmm12, [rsp] 
+        movups  xmm12, [rsp + 16] 
+        movups  xmm13, [rsp] 
+        movups  xmm13, [rsp + 16] 
+        movups  xmm14, [rsp] 
+        movups  xmm14, [rsp + 16] 
+        movups  xmm15, [rsp] 
+    )");
+    std::unique_ptr<X86Lab::Vm> const vm(
+        createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly));
+
+    // Check the XMM registers against the expected values.
+    // @param exp: The expected value of each XMM register.
+    auto const checkRegs([&](u128 const * const expected) {
+        X86Lab::Vm::State::Registers const regs(vm->getRegisters());
+        for (u8 i(0); i < 16; ++i) {
+            TEST_ASSERT(regs.xmm[i] == expected[i]);
+        }
+    });
+
+    // Step the VM multiple times, asserting everytime that the VM remains
+    // Runnable.
+    // @param n: The number of steps to execute.
+    auto const runVm([&](u64 const n) {
+        for (u64 i(0); i < n; ++i) {
+            TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+        }
+    });
+
+    // Run the prelogue.
+    runVm(8);
+
+    // Need to construct the expected value manually since we cannot just put a
+    // 128 constant in code.
+    u128 v(0xDEADBEEFCAFEBABE);
+    v <<= 64;
+    v |= 0xF00F1337CA7D0516ULL;
+    // Holds the expected values of each XMM register.
+    u128 exp[16] = {0};
+    for (u8 i(0); i < 16; ++i) {
+        exp[i] = v;
+        checkRegs(exp);
+        // The register will be overwritten with 0 on the next instruction.
+        exp[i] = 0;
+        if (i < 15) {
+            // Only run if we did not check the last register.
+            runVm(2);
+        }
+    }
 }
 }

@@ -7,10 +7,11 @@ namespace X86Lab {
 // Convert an array of bytes into a u64. Assumes little-endian encoding.
 // @param array: The array of bytes, must be at least 8 bytes long.
 // @return: The u64 encoded in `array`.
-static u64 byteArrayToU64(u8 const * const array) {
-    u64 acc(0);
-    for (u8 i(0); i < 8; ++i) {
-        acc |= (u64(array[i]) << (i * 8));
+template<size_t bits>
+static auto byteArrayToU(u8 const * const array) {
+    std::conditional_t<bits == 64, u64, u128> acc(0);
+    for (u8 i(0); i < (bits/8); ++i) {
+        acc |= (std::conditional_t<bits == 64, u64, u128>(array[i]) << (i * 8));
     }
     return acc;
 }
@@ -35,10 +36,17 @@ Vm::State::Registers::Registers(kvm_regs const& regs,
     gdt({.base = sregs.gdt.base, .limit = sregs.gdt.limit}),
 
     // MMX registers are aliased with old x87 FPU registers.
-    mm0(byteArrayToU64(fpu.fpr[0])), mm1(byteArrayToU64(fpu.fpr[1])),
-    mm2(byteArrayToU64(fpu.fpr[2])), mm3(byteArrayToU64(fpu.fpr[3])),
-    mm4(byteArrayToU64(fpu.fpr[4])), mm5(byteArrayToU64(fpu.fpr[5])),
-    mm6(byteArrayToU64(fpu.fpr[6])), mm7(byteArrayToU64(fpu.fpr[7])) {}
+    mm0(byteArrayToU<64>(fpu.fpr[0])), mm1(byteArrayToU<64>(fpu.fpr[1])),
+    mm2(byteArrayToU<64>(fpu.fpr[2])), mm3(byteArrayToU<64>(fpu.fpr[3])),
+    mm4(byteArrayToU<64>(fpu.fpr[4])), mm5(byteArrayToU<64>(fpu.fpr[5])),
+    mm6(byteArrayToU<64>(fpu.fpr[6])), mm7(byteArrayToU<64>(fpu.fpr[7]))
+
+    // XMM registers are set in the constructor's body.
+    {
+    for (u8 i(0); i < 16; ++i) {
+        xmm[i] = byteArrayToU<128>(fpu.xmm[i]);
+    }
+}
 
 Vm::State::Registers const& Vm::State::registers() const {
     return m_regs;
@@ -128,11 +136,11 @@ Vm::State::Registers Vm::getRegisters() const {
     return State::Registers(regs, sregs, fpu);
 }
 
-// Fill fpu.fpr[regIdx] with value.
-static void fillMmxRegister(kvm_fpu& fpu, u8 const regIdx, u64 const value) {
-    assert(regIdx < 8);
-    for (u8 i(0); i < 8; ++i) {
-        fpu.fpr[regIdx][i] = (value >> (i * 8)) & 0xFF;
+template<size_t bits>
+static void uintToByteArray(std::conditional_t<bits == 64, u64, u128> const value,
+                       u8 * const array) {
+    for (u8 i(0); i < (bits / 8); ++i) {
+        array[i] = (value >> (i * 8)) & 0xFF;
     }
 }
 
@@ -172,14 +180,19 @@ void Vm::setRegisters(State::Registers const& registerValues) {
 
     // Set the MMX registers.
     kvm_fpu fpu(Util::Kvm::getFpu(m_vcpuFd));
-    fillMmxRegister(fpu, 0, registerValues.mm0);
-    fillMmxRegister(fpu, 1, registerValues.mm1);
-    fillMmxRegister(fpu, 2, registerValues.mm2);
-    fillMmxRegister(fpu, 3, registerValues.mm3);
-    fillMmxRegister(fpu, 4, registerValues.mm4);
-    fillMmxRegister(fpu, 5, registerValues.mm5);
-    fillMmxRegister(fpu, 6, registerValues.mm6);
-    fillMmxRegister(fpu, 7, registerValues.mm7);
+    uintToByteArray<64>(registerValues.mm0, fpu.fpr[0]);
+    uintToByteArray<64>(registerValues.mm1, fpu.fpr[1]);
+    uintToByteArray<64>(registerValues.mm2, fpu.fpr[2]);
+    uintToByteArray<64>(registerValues.mm3, fpu.fpr[3]);
+    uintToByteArray<64>(registerValues.mm4, fpu.fpr[4]);
+    uintToByteArray<64>(registerValues.mm5, fpu.fpr[5]);
+    uintToByteArray<64>(registerValues.mm6, fpu.fpr[6]);
+    uintToByteArray<64>(registerValues.mm7, fpu.fpr[7]);
+
+    // Set the XMM registers.
+    for (u8 i(0); i < 16; ++i) {
+        uintToByteArray<128>(registerValues.xmm[i], fpu.xmm[i]);
+    }
 
     Util::Kvm::setFpu(m_vcpuFd, fpu);
 }
@@ -416,6 +429,18 @@ void Vm::enableCpuMode(kvm_sregs& sregs, CpuMode const mode) {
     // it.
     sregs.cr0 |= (1 << 1);
     sregs.cr0 &= (~((1 << 2) | (1 << 3)));
+
+    // Setup control registers for SSE.
+    // FIXME: Check that this is supported by current CPU. Virtually all cpus
+    // support SSE these days.
+    // Technically we should provide an exception handler for #XM, as indicated
+    // by SSE's doc. However, we can't do much in case this happens, hence let
+    // the VM triple fault in that case.
+    // OSFXSR bit.
+    sregs.cr4 |= (1 << 9);
+    // OSXMMEXECPT bit
+    sregs.cr4 |= (1 << 10);
+    // CR0.EM is already cleared and CR0.MP is already set.
 
     if (mode == CpuMode::LongMode) {
         // 64-bit is a bit more involved. We need to setup multiple control
