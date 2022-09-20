@@ -76,6 +76,19 @@ private:
     std::string m_absPath;
 };
 
+// Functions related to x86 extension support.
+namespace Extension {
+// Check extension support on the current cpu.
+// @return: true if the extension is supported, false otherwise.
+bool hasMmx();
+bool hasSse();
+bool hasSse2();
+bool hasSse3();
+bool hasSsse3();
+bool hasSse4_1();
+bool hasSse4_2();
+}
+
 // Collection of helper functions to interact with the KVM API.
 namespace Kvm {
 // Get a KVM handle.

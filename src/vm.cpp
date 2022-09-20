@@ -424,23 +424,22 @@ void Vm::enableCpuMode(kvm_sregs& sregs, CpuMode const mode) {
 
     // Prepare MMX in both Protected and Long modes. Set MP to 1, EM to 0 and TS
     // to 0 as recommended by Intel's docs.
-    // FIXME: We should probably add a check that this CPU supports MMX. However
-    // this extension has been around so long that virtually every cpu supports
-    // it.
-    sregs.cr0 |= (1 << 1);
-    sregs.cr0 &= (~((1 << 2) | (1 << 3)));
+    if (Util::Extension::hasMmx()) {
+        sregs.cr0 |= (1 << 1);
+        sregs.cr0 &= (~((1 << 2) | (1 << 3)));
+    }
 
     // Setup control registers for SSE.
-    // FIXME: Check that this is supported by current CPU. Virtually all cpus
-    // support SSE these days.
-    // Technically we should provide an exception handler for #XM, as indicated
-    // by SSE's doc. However, we can't do much in case this happens, hence let
-    // the VM triple fault in that case.
-    // OSFXSR bit.
-    sregs.cr4 |= (1 << 9);
-    // OSXMMEXECPT bit
-    sregs.cr4 |= (1 << 10);
-    // CR0.EM is already cleared and CR0.MP is already set.
+    if (Util::Extension::hasSse()) {
+        // Technically we should provide an exception handler for #XM, as
+        // indicated by SSE's doc. However, we can't do much in case this
+        // happens, hence let the VM triple fault in that case.
+        // OSFXSR bit.
+        sregs.cr4 |= (1 << 9);
+        // OSXMMEXECPT bit
+        sregs.cr4 |= (1 << 10);
+        // CR0.EM is already cleared and CR0.MP is already set.
+    }
 
     if (mode == CpuMode::LongMode) {
         // 64-bit is a bit more involved. We need to setup multiple control

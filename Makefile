@@ -1,10 +1,13 @@
 CXX := clang++
+AS := $(CXX)
+ASFLAGS := -c
 CXXFLAGS := -Wall -Wextra -Werror -Iinclude/ -O3 -std=c++20
 LDLIBS := -lncurses
 SHELL := /bin/bash
 
 CPP_FILES := $(shell find src/ -type f -name "*.cpp")
-OBJ_FILES := $(CPP_FILES:%.cpp=%.o)
+ASM_FILES := $(shell find src/ -type f -name "*.s")
+OBJ_FILES := $(CPP_FILES:%.cpp=%.o) $(ASM_FILES:%.s=%.o)
 HPP_FILES := $(shell find include/ -type f -name "*.hpp")
 
 TEST_CPP_FILES := $(shell find tests/ -type f -name "*.cpp")

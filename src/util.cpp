@@ -38,6 +38,38 @@ std::ofstream TempFile::ostream(std::ios_base::openmode const mode) {
     return std::ofstream(m_absPath.c_str(), mode);
 }
 
+namespace Extension {
+// Holds the result of a CPUID instruction.
+struct CpuidResult {
+    u32 eax;
+    u32 ebx;
+    u32 ecx;
+    u32 edx;
+} __attribute__((packed));
+
+// Implementation of cpuid() to be called by cpuid() only.
+extern "C" void _cpuid(u32 const eax, CpuidResult * const dest);
+
+// Execute the cpuid instruction.
+// @param eax: The parameter for CPUID, the value that is loaded into EAX before
+// executing the CPUID instruction.
+// @return: A CpuidResult containing the values returned by CPUID in the eax,
+// ebx, ecx and edx registers.
+static CpuidResult cpuid(u32 const eax) {
+    CpuidResult res{};
+    _cpuid(eax, &res);
+    return res;
+}
+
+bool hasMmx()       { return !!(cpuid(0x1).edx & (1 << 23)); }
+bool hasSse()       { return !!(cpuid(0x1).edx & (1 << 25)); }
+bool hasSse2()      { return !!(cpuid(0x1).edx & (1 << 26)); }
+bool hasSse3()      { return !!(cpuid(0x1).ecx & (1 << 0));  }
+bool hasSsse3()     { return !!(cpuid(0x1).ecx & (1 << 9));  }
+bool hasSse4_1()    { return !!(cpuid(0x1).ecx & (1 << 19)); }
+bool hasSse4_2()    { return !!(cpuid(0x1).ecx & (1 << 20)); }
+}
+
 namespace Kvm {
 
 int getKvmHandle() {
