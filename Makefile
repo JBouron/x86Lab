@@ -1,6 +1,7 @@
 CXX := clang++
 CXXFLAGS := -Wall -Wextra -Werror -Iinclude/ -O3 -std=c++20
 LDLIBS := -lncurses
+SHELL := /bin/bash
 
 CPP_FILES := $(shell find src/ -type f -name "*.cpp")
 OBJ_FILES := $(CPP_FILES:%.cpp=%.o)
