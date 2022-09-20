@@ -73,16 +73,21 @@ private:
 };
 
 
-// The global TestCollection, containing all the tests to be run.
-static constinit TestCollection TEST_COLLECTION;
+// Get a reference on the global TestCollection, containing all the tests to be
+// run. Note: We need to do this the old way because not all compilers/libcpp
+// have std::vector's default constructor declared as constexpr.
+static TestCollection& getTestCollectionSingleton() {
+    static TestCollection TEST_COLLECTION;
+    return TEST_COLLECTION;
+}
 
 TestRegistration::TestRegistration(TestFunc const& func,
                                    std::string const& name) {
     Test const t(func, name);
-    TEST_COLLECTION.addTest(t);
+    getTestCollectionSingleton().addTest(t);
 }
 
 void runAllTests() {
-    TEST_COLLECTION.run();
+    getTestCollectionSingleton().run();
 }
 }
