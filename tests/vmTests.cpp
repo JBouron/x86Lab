@@ -5,22 +5,6 @@
 
 // Various tests for the X86Lab::Vm.
 
-// Write some assembly code into a temporary file and return the name of the
-// file.
-static std::string writeCode(std::string const& code) {
-    // For now we re-use the same file for all tests. We should however allocate
-    // temporary files.
-    std::string const fileName("/tmp/x86lab_testcode.S");
-    std::ofstream file(fileName, std::ios::out);
-    if (!file) {
-        throw X86Lab::Error("Cannot open temporary file", errno);
-    }
-
-    file << code;
-    file.close();
-    return fileName;
-}
-
 namespace X86Lab::Test::Vm {
 // Helper function to create a VM and load the given code to memory.
 // @param startMode: The cpu mode the VM should start in.
@@ -32,8 +16,17 @@ static std::unique_ptr<X86Lab::Vm> createVmAndLoadCode(
     std::string const& assembly,
     u64 const memorySizePages = 1) {
 
-    std::string const fileName(writeCode(assembly));
-    Code const code(fileName);
+    // Create a temporary file to write the code into, it will be used as input
+    // file for the assembler.
+    Util::TempFile source("/tmp/x86lab_testcode");
+    std::ofstream file(source.ostream());
+    if (!file) {
+        throw X86Lab::Error("Cannot open temporary file", errno);
+    }
+    file << assembly;
+    file.close();
+
+    Code const code(source.path());
     std::unique_ptr<X86Lab::Vm> vm(new X86Lab::Vm(startMode, memorySizePages));
     vm->loadCode(code);
     return vm;

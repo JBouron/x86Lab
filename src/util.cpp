@@ -1,8 +1,44 @@
 #include <x86lab/util.hpp>
 #include <fcntl.h>
 #include <unistd.h>
+#include <stdlib.h>
 
-namespace X86Lab::Util::Kvm {
+namespace X86Lab::Util {
+
+// ::mkstemp requires exactly six X chars.
+std::string const TempFile::suffix("XXXXXX");
+
+TempFile::TempFile(std::string const& pathPrefix) :
+    m_absPath(pathPrefix + suffix) {
+    // We don't need to keep the file descriptor around.
+    if (::mkstemp(m_absPath.data()) == -1) {
+        throw Error("Could not create temporary file", errno);
+    }
+    char const * absPathStr(realpath(m_absPath.c_str(), nullptr));
+    if (!absPathStr) {
+        throw Error("Could not compute absolute path to temporary file", errno);
+    }
+    m_absPath = absPathStr;
+}
+
+TempFile::~TempFile() {
+    // Ignore any error because of noexcept.
+    ::unlink(m_absPath.c_str());
+}
+
+std::string const& TempFile::path() const {
+    return m_absPath;
+}
+
+std::ifstream TempFile::istream(std::ios_base::openmode const mode) {
+    return std::ifstream(m_absPath.c_str(), mode);
+}
+
+std::ofstream TempFile::ostream(std::ios_base::openmode const mode) {
+    return std::ofstream(m_absPath.c_str(), mode);
+}
+
+namespace Kvm {
 
 int getKvmHandle() {
     static int kvmHandle(0);
@@ -131,5 +167,6 @@ void setFpu(int const vcpuFd, kvm_fpu const& fpu) {
     if (::ioctl(vcpuFd, KVM_SET_FPU, &fpu) == -1) {
         throw KvmError("Cannot set guest FPU state", errno);
     }
+}
 }
 }

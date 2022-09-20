@@ -7,6 +7,7 @@
 #include <linux/kvm.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <fstream>
 
 // Shorthand for the uintX_t types.
 using u8 = uint8_t;
@@ -38,8 +39,45 @@ public:
     MmapError(std::string const& what, int const errNo) : Error(what, errNo) {}
 };
 
+namespace Util {
+
+// RAII class for a temporary file. The file is deleted in the destructor.
+class TempFile {
+public:
+    // Create a TempFile. The resulting file name is named as <pathPrefix>XXXXXX
+    // where XXXXXX is replaced with a random string.
+    // @param pathPrefix: A path name prefix to use for the temporary file's
+    // name.
+    TempFile(std::string const& pathPrefix);
+
+    // Close the file.
+    ~TempFile();
+
+    // Get the full path to the temporary file.
+    // @return: An absolute path to the file.
+    std::string const& path() const;
+
+    // Get an std::ifstream on this file, initially pointing at the beginning of
+    // the file.
+    // @param mode: The open mode to use for the stream.
+    // @return: A new ifstream on this file.
+    std::ifstream istream(std::ios_base::openmode const mode = std::ios::in);
+
+    // Get an std::ofstream on this file, initially pointing at the beginning of
+    // the file.
+    // @param mode: The open mode to use for the stream.
+    // @return: A new ofstream on this file.
+    std::ofstream ostream(std::ios_base::openmode const mode = std::ios::out);
+
+private:
+    static const std::string suffix;
+
+    // Absolute path to the file.
+    std::string m_absPath;
+};
+
 // Collection of helper functions to interact with the KVM API.
-namespace Util::Kvm {
+namespace Kvm {
 // Get a KVM handle.
 // @return: A file descriptor on /dev/kvm.
 // @throws: A X86Lab::Error in case /dev/kvm cannot be opened.
@@ -118,5 +156,6 @@ kvm_fpu getFpu(int const vcpuFd);
 // @param fpu: The FPU state to set on the vcpu.
 // @throws: A KvmError in case of error.
 void setFpu(int const vcpuFd, kvm_fpu const& fpu);
+}
 }
 }
