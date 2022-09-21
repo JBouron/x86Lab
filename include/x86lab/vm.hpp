@@ -69,10 +69,10 @@ public:
             // Build a Registers from KVM's data structures.
             // @param regs: The value of general purpose registers.
             // @param sregs: The value of special registers.
-            // @param fpu: The state of the fpu.
+            // @param xsave: The state of the xsave area.
             Registers(kvm_regs const& regs,
                       kvm_sregs const& sregs,
-                      kvm_fpu const& fpu);
+                      Util::Kvm::XSaveArea const& xsave);
 
             bool operator==(Registers const&) const = default;
         };

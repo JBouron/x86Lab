@@ -187,17 +187,31 @@ u16 getMaxMemSlots(int const vmFd) {
     return max;
 }
 
-kvm_fpu getFpu(int const vcpuFd) {
-    kvm_fpu fpu{};
-    if (::ioctl(vcpuFd, KVM_GET_FPU, &fpu) == -1) {
-        throw KvmError("Cannot get guest FPU state", errno);
+XSaveArea getXSave(int const vcpuFd) {
+    // We have to read into a kvm_xsave and then copy into the XSaveArea due to
+    // packing not allowing us to get a direct pointer to XSaveArea::_kvmXSave.
+    kvm_xsave xsave{};
+    if (::ioctl(vcpuFd, KVM_GET_XSAVE2, &xsave) == -1) {
+        throw KvmError("Cannot get guest XSAVE state", errno);
     }
-    return fpu;
+    XSaveArea res;
+    res._kvmXSave = xsave;
+
+    // The KVM API does not set the state-component bitmap of the XSAVE area,
+    // e.g. it is left to 0. We need to set it ourselves in order for setXSave
+    // to actually write the registers we want.
+    // The first 2 bits of xstateBv indicate the presence of the state for x87
+    // and SSE respectively.
+    res.xstateBv |= 0x3;
+    return res;
 }
 
-void setFpu(int const vcpuFd, kvm_fpu const& fpu) {
-    if (::ioctl(vcpuFd, KVM_SET_FPU, &fpu) == -1) {
-        throw KvmError("Cannot set guest FPU state", errno);
+void setXSave(int const vcpuFd, XSaveArea const& xsave) {
+    // As with getXSave, we have to use a temporary kvm_xsave due to packing not
+    // allowing us to get a direct pointer to XSaveArea::_kvmXSave.
+    kvm_xsave kx(xsave._kvmXSave);
+    if (::ioctl(vcpuFd, KVM_SET_XSAVE, &kx) != 0) {
+        throw KvmError("Cannot set guest XSAVE state", errno);
     }
 }
 }

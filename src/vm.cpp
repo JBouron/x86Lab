@@ -4,21 +4,9 @@
 
 namespace X86Lab {
 
-// Convert an array of bytes into a u64. Assumes little-endian encoding.
-// @param array: The array of bytes, must be at least 8 bytes long.
-// @return: The u64 encoded in `array`.
-template<size_t bits>
-static auto byteArrayToU(u8 const * const array) {
-    std::conditional_t<bits == 64, u64, u128> acc(0);
-    for (u8 i(0); i < (bits/8); ++i) {
-        acc |= (std::conditional_t<bits == 64, u64, u128>(array[i]) << (i * 8));
-    }
-    return acc;
-}
-
 Vm::State::Registers::Registers(kvm_regs const& regs,
                                 kvm_sregs const& sregs,
-                                kvm_fpu const& fpu) :
+                                Util::Kvm::XSaveArea const& xsave) :
     rax(regs.rax), rbx(regs.rbx), rcx(regs.rcx), rdx(regs.rdx),
     rdi(regs.rdi), rsi(regs.rsi), rsp(regs.rsp), rbp(regs.rbp),
     r8(regs.r8),   r9(regs.r9),   r10(regs.r10), r11(regs.r11),
@@ -36,15 +24,15 @@ Vm::State::Registers::Registers(kvm_regs const& regs,
     gdt({.base = sregs.gdt.base, .limit = sregs.gdt.limit}),
 
     // MMX registers are aliased with old x87 FPU registers.
-    mm0(byteArrayToU<64>(fpu.fpr[0])), mm1(byteArrayToU<64>(fpu.fpr[1])),
-    mm2(byteArrayToU<64>(fpu.fpr[2])), mm3(byteArrayToU<64>(fpu.fpr[3])),
-    mm4(byteArrayToU<64>(fpu.fpr[4])), mm5(byteArrayToU<64>(fpu.fpr[5])),
-    mm6(byteArrayToU<64>(fpu.fpr[6])), mm7(byteArrayToU<64>(fpu.fpr[7]))
+    mm0(xsave.mm0), mm1(xsave.mm1),
+    mm2(xsave.mm2), mm3(xsave.mm3),
+    mm4(xsave.mm4), mm5(xsave.mm5),
+    mm6(xsave.mm6), mm7(xsave.mm7)
 
     // XMM registers are set in the constructor's body.
     {
     for (u8 i(0); i < 16; ++i) {
-        xmm[i] = byteArrayToU<128>(fpu.xmm[i]);
+        xmm[i] = xsave.xmm[i];
     }
 }
 
@@ -132,16 +120,8 @@ std::unique_ptr<Vm::State> Vm::getState() const {
 Vm::State::Registers Vm::getRegisters() const {
     kvm_regs const regs(Util::Kvm::getRegs(m_vcpuFd));
     kvm_sregs const sregs(Util::Kvm::getSRegs(m_vcpuFd));
-    kvm_fpu const fpu(Util::Kvm::getFpu(m_vcpuFd));
-    return State::Registers(regs, sregs, fpu);
-}
-
-template<size_t bits>
-static void uintToByteArray(std::conditional_t<bits == 64, u64, u128> const value,
-                       u8 * const array) {
-    for (u8 i(0); i < (bits / 8); ++i) {
-        array[i] = (value >> (i * 8)) & 0xFF;
-    }
+    Util::Kvm::XSaveArea const xsave(Util::Kvm::getXSave(m_vcpuFd));
+    return State::Registers(regs, sregs, xsave);
 }
 
 void Vm::setRegisters(State::Registers const& registerValues) {
@@ -178,23 +158,24 @@ void Vm::setRegisters(State::Registers const& registerValues) {
 
     Util::Kvm::setSRegs(m_vcpuFd, sregs);
 
+
+    Util::Kvm::XSaveArea xsave(Util::Kvm::getXSave(m_vcpuFd));
     // Set the MMX registers.
-    kvm_fpu fpu(Util::Kvm::getFpu(m_vcpuFd));
-    uintToByteArray<64>(registerValues.mm0, fpu.fpr[0]);
-    uintToByteArray<64>(registerValues.mm1, fpu.fpr[1]);
-    uintToByteArray<64>(registerValues.mm2, fpu.fpr[2]);
-    uintToByteArray<64>(registerValues.mm3, fpu.fpr[3]);
-    uintToByteArray<64>(registerValues.mm4, fpu.fpr[4]);
-    uintToByteArray<64>(registerValues.mm5, fpu.fpr[5]);
-    uintToByteArray<64>(registerValues.mm6, fpu.fpr[6]);
-    uintToByteArray<64>(registerValues.mm7, fpu.fpr[7]);
+    xsave.mm0 = registerValues.mm0;
+    xsave.mm1 = registerValues.mm1;
+    xsave.mm2 = registerValues.mm2;
+    xsave.mm3 = registerValues.mm3;
+    xsave.mm4 = registerValues.mm4;
+    xsave.mm5 = registerValues.mm5;
+    xsave.mm6 = registerValues.mm6;
+    xsave.mm7 = registerValues.mm7;
 
     // Set the XMM registers.
     for (u8 i(0); i < 16; ++i) {
-        uintToByteArray<128>(registerValues.xmm[i], fpu.xmm[i]);
+        xsave.xmm[i] = registerValues.xmm[i];
     }
 
-    Util::Kvm::setFpu(m_vcpuFd, fpu);
+    Util::Kvm::setXSave(m_vcpuFd, xsave);
 }
 
 Vm::OperatingState Vm::operatingState() const {

@@ -169,6 +169,61 @@ kvm_fpu getFpu(int const vcpuFd);
 // @param fpu: The FPU state to set on the vcpu.
 // @throws: A KvmError in case of error.
 void setFpu(int const vcpuFd, kvm_fpu const& fpu);
+
+// Memory layout of the XSAVE area returned by KVM_GET_XSAVE2. This is used to
+// fish the register values we are interested in, without having to compute the
+// specific offsets needed within kvm_xsave.region[].
+struct XSaveArea {
+    union {
+        kvm_xsave _kvmXSave;
+        struct {
+            // Legacy xsave region:
+            // x87 FPU state. FIXME: Add support.
+            u64 : 64;
+            u64 : 64;
+            u64 : 64;
+
+            // SSE's MXCSR and MXCSR_MASK. FIXME: Add support.
+            u32 : 32;
+            u32 : 32;
+
+            // MMX registers. The 64 bits following each register in the
+            // XSAVE area is half x87 FPU half reserved. Ignore.
+            u64 mm0; u64 : 64;
+            u64 mm1; u64 : 64;
+            u64 mm2; u64 : 64;
+            u64 mm3; u64 : 64;
+            u64 mm4; u64 : 64;
+            u64 mm5; u64 : 64;
+            u64 mm6; u64 : 64;
+            u64 mm7; u64 : 64;
+
+            // XMM registers.
+            u128 xmm[16];
+
+            // Padding of the legacy Xsave area until offset 512, reserved.
+            u8 ignored[96];
+
+            // Xsave header:
+            // The state-component bitmap indicating what state is present in
+            // this xsave area.
+            u8 xstateBv;
+        } __attribute__((packed));
+    } __attribute__((packed));
+} __attribute__((packed));
+
+// Get the vcpu's XSAVE area. This calls the KVM_GET_XSAVE2 ioctl.
+// @param vcpuFd: The file descriptor of the target vcpu.
+// @return: A XSaveArea containing the vcpu's current XSAVE.
+// @throws: A KvmError in case of error.
+// FIXME: Return a pointer.
+XSaveArea getXSave(int const vcpuFd);
+
+// Set the vcpu's XSAVE area. This calls the KVM_SET_XSAVE ioctl.
+// @param vcpuFd: The file descriptor of the target vcpu.
+// @param xsave: The XSAVE area to write to the vcpu.
+// @throws: A KvmError in case of error.
+void setXSave(int const vcpuFd, XSaveArea const& xsave);
 }
 }
 }
