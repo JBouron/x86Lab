@@ -183,9 +183,9 @@ struct XSaveArea {
             u64 : 64;
             u64 : 64;
 
-            // SSE's MXCSR and MXCSR_MASK. FIXME: Add support.
-            u32 : 32;
-            u32 : 32;
+            // SSE's MXCSR and MXCSR_MASK.
+            u32 mxcsr;
+            u32 mxcsrMask;
 
             // MMX registers. The 64 bits following each register in the
             // XSAVE area is half x87 FPU half reserved. Ignore.

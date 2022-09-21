@@ -27,10 +27,9 @@ Vm::State::Registers::Registers(kvm_regs const& regs,
     mm0(xsave.mm0), mm1(xsave.mm1),
     mm2(xsave.mm2), mm3(xsave.mm3),
     mm4(xsave.mm4), mm5(xsave.mm5),
-    mm6(xsave.mm6), mm7(xsave.mm7)
+    mm6(xsave.mm6), mm7(xsave.mm7),
 
-    // XMM registers are set in the constructor's body.
-    {
+    mxcsr(xsave.mxcsr) {
     for (u8 i(0); i < 16; ++i) {
         xmm[i] = xsave.xmm[i];
     }
@@ -169,6 +168,9 @@ void Vm::setRegisters(State::Registers const& registerValues) {
     xsave.mm5 = registerValues.mm5;
     xsave.mm6 = registerValues.mm6;
     xsave.mm7 = registerValues.mm7;
+
+    // MXCSR_MASK indicates the writable bits in MXCSR.
+    xsave.mxcsr = registerValues.mxcsr & xsave.mxcsrMask;
 
     // Set the XMM registers.
     for (u8 i(0); i < 16; ++i) {

@@ -628,6 +628,8 @@ DECLARE_TEST(testSetRegisters) {
     expected.mm6 = 0x0707070707070707;
     expected.mm7 = 0x0808080808080808;
 
+    expected.mxcsr ^= (3 << 13);
+
     // XMM registers. Just some arbitrary patterns/values.
     for (u8 i(0); i < 16; ++i) {
         u64 const high(0x1111111111111111ULL * i);
@@ -982,6 +984,15 @@ DECLARE_TEST(testReadXmmRegisters) {
         movups  xmm14, [rsp] 
         movups  xmm14, [rsp + 16] 
         movups  xmm15, [rsp] 
+
+        sub     rsp, 8
+        stmxcsr [rsp]
+        mov     eax, [rsp]
+        xor     eax, (3 << 13)
+        mov     [rsp], eax
+        ldmxcsr [rsp]
+
+        hlt
     )");
     std::unique_ptr<X86Lab::Vm> const vm(
         createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly));
@@ -1004,6 +1015,8 @@ DECLARE_TEST(testReadXmmRegisters) {
         }
     });
 
+    u32 const origMxcsr(vm->getRegisters().mxcsr);
+
     // Run the prelogue.
     runVm(8);
 
@@ -1024,5 +1037,10 @@ DECLARE_TEST(testReadXmmRegisters) {
             runVm(2);
         }
     }
+
+    // Run code modifying MXCSR. This toggles bits 13 and 14.
+    runVm(6);
+    u32 const expMxcsr(origMxcsr ^ (3 << 13));
+    TEST_ASSERT(vm->getRegisters().mxcsr == expMxcsr);
 }
 }

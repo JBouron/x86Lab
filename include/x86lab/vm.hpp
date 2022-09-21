@@ -61,6 +61,9 @@ public:
             u64 mm6;
             u64 mm7;
 
+            // SSE's MXCSR register.
+            u32 mxcsr;
+
             // XMM registers.
             u128 xmm[16];
 
