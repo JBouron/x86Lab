@@ -69,6 +69,12 @@ public:
 
             // TODO: Include floating point registers.
 
+            // YMM registers.
+            // FIXME: YMM regs are aliased to their XMM reg for the bottom 128
+            // bits. We could save a lot of space by deduplicating those bottom
+            // bits in this struct.
+            u256 ymm[16];
+
             // Build a Registers from KVM's data structures.
             // @param regs: The value of general purpose registers.
             // @param sregs: The value of special registers.

@@ -630,14 +630,19 @@ DECLARE_TEST(testSetRegisters) {
 
     expected.mxcsr ^= (3 << 13);
 
-    // XMM registers. Just some arbitrary patterns/values.
+    // XMM and YMM registers. Just some arbitrary patterns/values.
     for (u8 i(0); i < 16; ++i) {
         u64 const high(0x1111111111111111ULL * i);
         u64 const low(~high);
         u128 val(high);
         val <<= 64;
         val |= low;
-        expected.xmm[0] = val;
+        expected.xmm[i] = val;
+        // FIXME: XMM and YMM are supposed to share some bits. However in the
+        // Registers struct this is not the case, hence we need to make sure
+        // that YMMi[128:0] == XMMi.
+        expected.ymm[i][0] = val;
+        expected.ymm[i][1] = ~val;
     }
 
     // Set the registers on the VM.
@@ -1042,5 +1047,116 @@ DECLARE_TEST(testReadXmmRegisters) {
     runVm(6);
     u32 const expMxcsr(origMxcsr ^ (3 << 13));
     TEST_ASSERT(vm->getRegisters().mxcsr == expMxcsr);
+}
+
+DECLARE_TEST(testReadYmmRegisters) {
+    std::string const assembly(R"(
+        BITS 64
+
+        ; Push two double-quadword onto the stack, to be loaded in xmm
+        ; registers, one 0 (rsp + 32) and another with an arbitrary value (rsp).
+        xor     rax, rax
+
+        ; 256-bit word 0x0.
+        push    rax
+        push    rax
+        push    rax
+        push    rax
+
+        ; 256-bit word
+        ;   0xDEADBEEFCAFEBABEF00F1337CA7D0516ABCDEF0123456789F1E2D3C4B5A69788
+        mov     rax, 0xDEADBEEFCAFEBABE
+        push    rax
+        mov     rax, 0xF00F1337CA7D0516
+        push    rax
+        mov     rax, 0xABCDEF0123456789
+        push    rax
+        mov     rax, 0xF1E2D3C4B5A69788
+        push    rax
+
+        vmovdqu ymm0, [rsp]
+        vmovdqu ymm0, [rsp + 32]
+        vmovdqu ymm1, [rsp]
+        vmovdqu ymm1, [rsp + 32]
+        vmovdqu ymm2, [rsp]
+        vmovdqu ymm2, [rsp + 32]
+        vmovdqu ymm3, [rsp]
+        vmovdqu ymm3, [rsp + 32]
+        vmovdqu ymm4, [rsp]
+        vmovdqu ymm4, [rsp + 32]
+        vmovdqu ymm5, [rsp]
+        vmovdqu ymm5, [rsp + 32]
+        vmovdqu ymm6, [rsp]
+        vmovdqu ymm6, [rsp + 32]
+        vmovdqu ymm7, [rsp]
+        vmovdqu ymm7, [rsp + 32]
+        vmovdqu ymm8, [rsp]
+        vmovdqu ymm8, [rsp + 32]
+        vmovdqu ymm9, [rsp]
+        vmovdqu ymm9, [rsp + 32]
+        vmovdqu ymm10, [rsp]
+        vmovdqu ymm10, [rsp + 32]
+        vmovdqu ymm11, [rsp]
+        vmovdqu ymm11, [rsp + 32]
+        vmovdqu ymm12, [rsp]
+        vmovdqu ymm12, [rsp + 32]
+        vmovdqu ymm13, [rsp]
+        vmovdqu ymm13, [rsp + 32]
+        vmovdqu ymm14, [rsp]
+        vmovdqu ymm14, [rsp + 32]
+        vmovdqu ymm15, [rsp]
+        vmovdqu ymm15, [rsp + 32]
+
+        nop
+        hlt
+    )");
+    std::unique_ptr<X86Lab::Vm> const vm(
+        createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly));
+
+    // Step the VM multiple times, asserting everytime that the VM remains
+    // Runnable.
+    // @param n: The number of steps to execute.
+    auto const runVm([&](u64 const n) {
+        for (u64 i(0); i < n; ++i) {
+            TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+        }
+    });
+
+    // Asserts the values of the YMM registers.
+    // @param idx: The index of the YMM register which is expected to contain
+    // the 256-bit word.
+    // If only YMM_idx contains the word and every other YMM register is 0 then
+    // the check is passing, otherwise this is an assert failure.
+    auto const checkRegs([&](u8 const idx) {
+        // The high and low 128-bit word of the 256-bit word written into the YMM
+        // registers.
+        u128 high(0xDEADBEEFCAFEBABEULL);
+        high <<= 64;
+        high |= 0xF00F1337CA7D0516ULL;
+        u128 low(0xABCDEF0123456789ULL);
+        low <<= 64;
+        low |= 0xF1E2D3C4B5A69788ULL;
+        X86Lab::Vm::State::Registers const regs(vm->getRegisters());
+        for (u8 i(0); i < 16; ++i) {
+            if (i == idx) {
+                TEST_ASSERT(regs.ymm[i][0] == low);
+                TEST_ASSERT(regs.ymm[i][1] == high);
+            } else {
+                TEST_ASSERT(!regs.ymm[i][0]);
+                TEST_ASSERT(!regs.ymm[i][1]);
+            }
+        }
+    });
+
+    // Run prologue.
+    runVm(13);
+
+    for (u8 i(0); i < 16; ++i) {
+        // Run the first vmovdqu setting the reg to the special value.
+        runVm(1);
+        checkRegs(i);
+        runVm(1);
+        // Run the second vmovdqu zero'ing the reg.
+    }
 }
 }

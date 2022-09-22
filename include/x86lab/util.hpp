@@ -8,6 +8,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <fstream>
+#include <memory>
 
 // Shorthand for the uintX_t types.
 using u8 = uint8_t;
@@ -15,6 +16,7 @@ using u16 = uint16_t;
 using u32 = uint32_t;
 using u64 = uint64_t;
 using u128 = __uint128_t;
+using u256 = u128[2];
 
 namespace X86Lab {
 
@@ -87,6 +89,8 @@ bool hasSse3();
 bool hasSsse3();
 bool hasSse4_1();
 bool hasSse4_2();
+bool hasAvx();
+bool hasAvx2();
 }
 
 // Collection of helper functions to interact with the KVM API.
@@ -210,20 +214,41 @@ struct XSaveArea {
             u8 xstateBv;
         } __attribute__((packed));
     } __attribute__((packed));
+    // The YMM registers ... unfortunately we cannot know for sure in advance at
+    // which offsets the YMM registers (technically their higher half) will be
+    // stored in the kvm_xsave. This is because at hardware level the offset is
+    // given by cpuid. Hence we cannot 'overlay' with an union to access those.
+    // KVM's doc indicates that the kvm_xsave region has the same layout
+    // described by cpuid lead 0xD on the host.
+    // For now duplicate the YMM register state here. This structure should be
+    // reworked to avoid such duplication. FIXME!
+    u256 ymm[16];
 } __attribute__((packed));
 
 // Get the vcpu's XSAVE area. This calls the KVM_GET_XSAVE2 ioctl.
 // @param vcpuFd: The file descriptor of the target vcpu.
 // @return: A XSaveArea containing the vcpu's current XSAVE.
 // @throws: A KvmError in case of error.
-// FIXME: Return a pointer.
-XSaveArea getXSave(int const vcpuFd);
+std::unique_ptr<XSaveArea> getXSave(int const vcpuFd);
 
 // Set the vcpu's XSAVE area. This calls the KVM_SET_XSAVE ioctl.
 // @param vcpuFd: The file descriptor of the target vcpu.
 // @param xsave: The XSAVE area to write to the vcpu.
 // @throws: A KvmError in case of error.
 void setXSave(int const vcpuFd, XSaveArea const& xsave);
+
+// Get the current value of vcpu's XCR0 register. This calls KVM_GET_XCRS.
+// @param vcpuFd: The file descriptor of the target vcpu.
+// @return XCR0.
+// @throws: A KvmError in case of error.
+u64 getXcr0(int const vcpuFd);
+
+// Set the value of vcpu's XCR0 register. This calls KVM_SET_XCRS.
+// @param vcpuFd: The file descriptor of the target vcpu.
+// @param xcr0: The value to write into XCR0.
+// @throws: A KvmError in case of error.
+void setXcr0(int const vcpuFd, u64 const xcr0);
+
 }
 }
 }

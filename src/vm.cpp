@@ -33,6 +33,11 @@ Vm::State::Registers::Registers(kvm_regs const& regs,
     for (u8 i(0); i < 16; ++i) {
         xmm[i] = xsave.xmm[i];
     }
+
+    for (u8 i(0); i < 16; ++i) {
+        ymm[i][0] = xsave.ymm[i][0];
+        ymm[i][1] = xsave.ymm[i][1];
+    }
 }
 
 Vm::State::Registers const& Vm::State::registers() const {
@@ -119,8 +124,8 @@ std::unique_ptr<Vm::State> Vm::getState() const {
 Vm::State::Registers Vm::getRegisters() const {
     kvm_regs const regs(Util::Kvm::getRegs(m_vcpuFd));
     kvm_sregs const sregs(Util::Kvm::getSRegs(m_vcpuFd));
-    Util::Kvm::XSaveArea const xsave(Util::Kvm::getXSave(m_vcpuFd));
-    return State::Registers(regs, sregs, xsave);
+    std::unique_ptr<Util::Kvm::XSaveArea> const xsave(Util::Kvm::getXSave(m_vcpuFd));
+    return State::Registers(regs, sregs, *xsave);
 }
 
 void Vm::setRegisters(State::Registers const& registerValues) {
@@ -158,26 +163,30 @@ void Vm::setRegisters(State::Registers const& registerValues) {
     Util::Kvm::setSRegs(m_vcpuFd, sregs);
 
 
-    Util::Kvm::XSaveArea xsave(Util::Kvm::getXSave(m_vcpuFd));
+    std::unique_ptr<Util::Kvm::XSaveArea> xsave(Util::Kvm::getXSave(m_vcpuFd));
     // Set the MMX registers.
-    xsave.mm0 = registerValues.mm0;
-    xsave.mm1 = registerValues.mm1;
-    xsave.mm2 = registerValues.mm2;
-    xsave.mm3 = registerValues.mm3;
-    xsave.mm4 = registerValues.mm4;
-    xsave.mm5 = registerValues.mm5;
-    xsave.mm6 = registerValues.mm6;
-    xsave.mm7 = registerValues.mm7;
+    xsave->mm0 = registerValues.mm0;
+    xsave->mm1 = registerValues.mm1;
+    xsave->mm2 = registerValues.mm2;
+    xsave->mm3 = registerValues.mm3;
+    xsave->mm4 = registerValues.mm4;
+    xsave->mm5 = registerValues.mm5;
+    xsave->mm6 = registerValues.mm6;
+    xsave->mm7 = registerValues.mm7;
 
     // MXCSR_MASK indicates the writable bits in MXCSR.
-    xsave.mxcsr = registerValues.mxcsr & xsave.mxcsrMask;
+    xsave->mxcsr = registerValues.mxcsr & xsave->mxcsrMask;
 
-    // Set the XMM registers.
+    // Set the XMM and YMM registers.
     for (u8 i(0); i < 16; ++i) {
-        xsave.xmm[i] = registerValues.xmm[i];
+        // FIXME: Having YMM and XMM stored separately is a receipe for
+        // disaster.
+        xsave->xmm[i] = registerValues.xmm[i];
+        xsave->ymm[i][0] = registerValues.ymm[i][0];
+        xsave->ymm[i][1] = registerValues.ymm[i][1];
     }
 
-    Util::Kvm::setXSave(m_vcpuFd, xsave);
+    Util::Kvm::setXSave(m_vcpuFd, *xsave);
 }
 
 Vm::OperatingState Vm::operatingState() const {
@@ -422,6 +431,16 @@ void Vm::enableCpuMode(kvm_sregs& sregs, CpuMode const mode) {
         // OSXMMEXECPT bit
         sregs.cr4 |= (1 << 10);
         // CR0.EM is already cleared and CR0.MP is already set.
+    }
+
+    // Setup AVX.
+    if (Util::Extension::hasAvx()) {
+        // Set CR4.OSXSAVE[bit18] to enable AVX state saving using XSAVE/XRSTOR.
+        sregs.cr4 |= (1 << 18);
+        // Set bits 1 and 2 in XCR0 (bit 1 must always be set) to enable AVX
+        // state in XSAVE.
+        u64 const xcr0(Util::Kvm::getXcr0(m_vcpuFd));
+        Util::Kvm::setXcr0(m_vcpuFd, xcr0 | 0x7);
     }
 
     if (mode == CpuMode::LongMode) {

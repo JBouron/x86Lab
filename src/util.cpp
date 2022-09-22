@@ -48,26 +48,29 @@ struct CpuidResult {
 } __attribute__((packed));
 
 // Implementation of cpuid() to be called by cpuid() only.
-extern "C" void _cpuid(u32 const eax, CpuidResult * const dest);
+extern "C" void _cpuid(u32 const eax, u32 const ecx, CpuidResult * const dest);
 
 // Execute the cpuid instruction.
 // @param eax: The parameter for CPUID, the value that is loaded into EAX before
 // executing the CPUID instruction.
+// @param ecx: The ECX parameter for CPUID.
 // @return: A CpuidResult containing the values returned by CPUID in the eax,
 // ebx, ecx and edx registers.
-static CpuidResult cpuid(u32 const eax) {
+static CpuidResult cpuid(u32 const eax, u32 const ecx) {
     CpuidResult res{};
-    _cpuid(eax, &res);
+    _cpuid(eax, ecx, &res);
     return res;
 }
 
-bool hasMmx()       { return !!(cpuid(0x1).edx & (1 << 23)); }
-bool hasSse()       { return !!(cpuid(0x1).edx & (1 << 25)); }
-bool hasSse2()      { return !!(cpuid(0x1).edx & (1 << 26)); }
-bool hasSse3()      { return !!(cpuid(0x1).ecx & (1 << 0));  }
-bool hasSsse3()     { return !!(cpuid(0x1).ecx & (1 << 9));  }
-bool hasSse4_1()    { return !!(cpuid(0x1).ecx & (1 << 19)); }
-bool hasSse4_2()    { return !!(cpuid(0x1).ecx & (1 << 20)); }
+bool hasMmx()       { return !!(cpuid(0x1, 0x0).edx & (1 << 23)); }
+bool hasSse()       { return !!(cpuid(0x1, 0x0).edx & (1 << 25)); }
+bool hasSse2()      { return !!(cpuid(0x1, 0x0).edx & (1 << 26)); }
+bool hasSse3()      { return !!(cpuid(0x1, 0x0).ecx & (1 << 0));  }
+bool hasSsse3()     { return !!(cpuid(0x1, 0x0).ecx & (1 << 9));  }
+bool hasSse4_1()    { return !!(cpuid(0x1, 0x0).ecx & (1 << 19)); }
+bool hasSse4_2()    { return !!(cpuid(0x1, 0x0).ecx & (1 << 20)); }
+bool hasAvx()       { return !!(cpuid(0x1, 0x0).ecx & (1 << 28)); }
+bool hasAvx2()      { return !!(cpuid(0x7, 0x0).ecx & (1 << 5));  }
 }
 
 namespace Kvm {
@@ -187,22 +190,31 @@ u16 getMaxMemSlots(int const vmFd) {
     return max;
 }
 
-XSaveArea getXSave(int const vcpuFd) {
+std::unique_ptr<XSaveArea> getXSave(int const vcpuFd) {
     // We have to read into a kvm_xsave and then copy into the XSaveArea due to
     // packing not allowing us to get a direct pointer to XSaveArea::_kvmXSave.
     kvm_xsave xsave{};
     if (::ioctl(vcpuFd, KVM_GET_XSAVE2, &xsave) == -1) {
         throw KvmError("Cannot get guest XSAVE state", errno);
     }
-    XSaveArea res;
-    res._kvmXSave = xsave;
+    std::unique_ptr<XSaveArea> res(new XSaveArea);
+    res->_kvmXSave = xsave;
 
     // The KVM API does not set the state-component bitmap of the XSAVE area,
     // e.g. it is left to 0. We need to set it ourselves in order for setXSave
     // to actually write the registers we want.
     // The first 2 bits of xstateBv indicate the presence of the state for x87
-    // and SSE respectively.
-    res.xstateBv |= 0x3;
+    // and SSE respectively. Bit 2 indicates the presence of AVX state.
+    res->xstateBv |= 0x7;
+
+    // Manually set the ymm copies in XSaveArea. FIXME!.
+    // Offset at which the YMM0_H-YMM15_H are stored in the xsave area.
+    u32 const ymmOffset(Extension::cpuid(0xD, 0x2).ebx);
+    u8 const * const rawYmmState(reinterpret_cast<u8*>(xsave.region) + ymmOffset);
+    for (u32 i(0); i < 16; ++i) {
+        res->ymm[i][0] = res->xmm[i];
+        res->ymm[i][1] = *(reinterpret_cast<u128 const*>(rawYmmState) + i);
+    }
     return res;
 }
 
@@ -210,9 +222,38 @@ void setXSave(int const vcpuFd, XSaveArea const& xsave) {
     // As with getXSave, we have to use a temporary kvm_xsave due to packing not
     // allowing us to get a direct pointer to XSaveArea::_kvmXSave.
     kvm_xsave kx(xsave._kvmXSave);
+
+    // Manually set the ymm state in kvm_xsave. FIXME!
+    u32 const ymmOffset(Extension::cpuid(0xD, 0x2).ebx);
+    u8 * const rawYmmState(reinterpret_cast<u8*>(kx.region) + ymmOffset);
+    for (u32 i(0); i < 16; ++i) {
+        std::memcpy(rawYmmState + i * 16, &xsave.ymm[i][1], 16);
+    }
+
     if (::ioctl(vcpuFd, KVM_SET_XSAVE, &kx) != 0) {
         throw KvmError("Cannot set guest XSAVE state", errno);
     }
 }
+
+u64 getXcr0(int const vcpuFd) {
+    kvm_xcrs dest{};
+    if (::ioctl(vcpuFd, KVM_GET_XCRS, &dest) == -1) {
+        throw KvmError("Failed KVM_GET_XCRS", errno);
+    }
+    return dest.xcrs[0].value;
+}
+
+void setXcr0(int const vcpuFd, u64 const xcr0) {
+    kvm_xcrs src{};
+    if (::ioctl(vcpuFd, KVM_GET_XCRS, &src) == -1) {
+        throw KvmError("Failed KVM_GET_XCRS", errno);
+    }
+    src.xcrs[0].value |= xcr0;
+    if (::ioctl(vcpuFd, KVM_SET_XCRS, &src) == -1) {
+        throw KvmError("Failed KVM_SET_XCRS", errno);
+    }
+
+}
+
 }
 }
