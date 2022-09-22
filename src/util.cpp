@@ -210,10 +210,10 @@ std::unique_ptr<XSaveArea> getXSave(int const vcpuFd) {
     // Manually set the ymm copies in XSaveArea. FIXME!.
     // Offset at which the YMM0_H-YMM15_H are stored in the xsave area.
     u32 const ymmOffset(Extension::cpuid(0xD, 0x2).ebx);
-    u8 const * const rawYmmState(reinterpret_cast<u8*>(xsave.region) + ymmOffset);
+    u8 const * const ymmState(reinterpret_cast<u8*>(xsave.region) + ymmOffset);
     for (u32 i(0); i < 16; ++i) {
         res->ymm[i][0] = res->xmm[i];
-        res->ymm[i][1] = *(reinterpret_cast<u128 const*>(rawYmmState) + i);
+        res->ymm[i][1] = *(reinterpret_cast<u128 const*>(ymmState) + i);
     }
     return res;
 }

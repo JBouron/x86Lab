@@ -124,7 +124,8 @@ std::unique_ptr<Vm::State> Vm::getState() const {
 Vm::State::Registers Vm::getRegisters() const {
     kvm_regs const regs(Util::Kvm::getRegs(m_vcpuFd));
     kvm_sregs const sregs(Util::Kvm::getSRegs(m_vcpuFd));
-    std::unique_ptr<Util::Kvm::XSaveArea> const xsave(Util::Kvm::getXSave(m_vcpuFd));
+    std::unique_ptr<Util::Kvm::XSaveArea> const xsave(
+        Util::Kvm::getXSave(m_vcpuFd));
     return State::Registers(regs, sregs, *xsave);
 }
 

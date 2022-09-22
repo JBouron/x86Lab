@@ -1128,8 +1128,8 @@ DECLARE_TEST(testReadYmmRegisters) {
     // If only YMM_idx contains the word and every other YMM register is 0 then
     // the check is passing, otherwise this is an assert failure.
     auto const checkRegs([&](u8 const idx) {
-        // The high and low 128-bit word of the 256-bit word written into the YMM
-        // registers.
+        // The high and low 128-bit word of the 256-bit word written into the
+        // YMM registers.
         u128 high(0xDEADBEEFCAFEBABEULL);
         high <<= 64;
         high |= 0xF00F1337CA7D0516ULL;
