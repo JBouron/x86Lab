@@ -855,19 +855,23 @@ DECLARE_TEST(testReadMmxRegisters) {
     std::unique_ptr<X86Lab::Vm> const vm(
         createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly));
 
-    // Check the MMX register against the expected values.
-    // @param mm0-mm7: The expected value of each MMX register.
-    auto const checkRegs([&](u64 mm0, u64 mm1, u64 mm2, u64 mm3,
-                             u64 mm4, u64 mm5, u64 mm6, u64 mm7) {
+    // Asserts the values of the MMX registers.
+    // @param idx: The index of the MMX register which is expected to contain
+    // the 128-bit word.
+    // If only MMX_idx contains the word and every other MMX register is 0 then
+    // the check is passing, otherwise this is an assert failure.
+    auto const checkRegs([&](u8 const idx) {
+        // The high and low 128-bit word of the 256-bit word written into the
+        // YMM registers.
+        u64 const v(0xDEADBEEFCAFEBABEULL);
         X86Lab::Vm::State::Registers const regs(vm->getRegisters());
-        TEST_ASSERT(regs.mmx[0] == mm0);
-        TEST_ASSERT(regs.mmx[1] == mm1);
-        TEST_ASSERT(regs.mmx[2] == mm2);
-        TEST_ASSERT(regs.mmx[3] == mm3);
-        TEST_ASSERT(regs.mmx[4] == mm4);
-        TEST_ASSERT(regs.mmx[5] == mm5);
-        TEST_ASSERT(regs.mmx[6] == mm6);
-        TEST_ASSERT(regs.mmx[7] == mm7);
+        for (u8 i(0); i < 8; ++i) {
+            if (i == idx) {
+                TEST_ASSERT(regs.mmx[i] == v);
+            } else {
+                TEST_ASSERT(!regs.mmx[i]);
+            }
+        }
     });
 
     // Step the VM multiple times, asserting everytime that the VM remains
@@ -882,24 +886,11 @@ DECLARE_TEST(testReadMmxRegisters) {
     // Run the prelogue.
     runVm(2);
 
-    u64 const v(0xDEADBEEFCAFEBABEULL);
-    checkRegs(0, 0, 0, 0, 0, 0, 0, 0);
-    runVm(1);
-    checkRegs(v, 0, 0, 0, 0, 0, 0, 0);
-    runVm(2);
-    checkRegs(0, v, 0, 0, 0, 0, 0, 0);
-    runVm(2);
-    checkRegs(0, 0, v, 0, 0, 0, 0, 0);
-    runVm(2);
-    checkRegs(0, 0, 0, v, 0, 0, 0, 0);
-    runVm(2);
-    checkRegs(0, 0, 0, 0, v, 0, 0, 0);
-    runVm(2);
-    checkRegs(0, 0, 0, 0, 0, v, 0, 0);
-    runVm(2);
-    checkRegs(0, 0, 0, 0, 0, 0, v, 0);
-    runVm(2);
-    checkRegs(0, 0, 0, 0, 0, 0, 0, v);
+    for (u8 i(0); i < 8; ++i) {
+        runVm(1);
+        checkRegs(i);
+        runVm(1);
+    }
 }
 
 // Check that MMX is supported and properly initialized by running an MMX
