@@ -18,6 +18,110 @@ using u64 = uint64_t;
 using u128 = __uint128_t;
 using u256 = u128[2];
 
+// Concept for a type that can be an element of a vector register. For MMX, SSE
+// and AVX the packed elements are either: bytes, words, dwords, qwords, float
+// and double.
+template<typename T>
+concept isPackable = std::is_same<T, u8>::value ||
+                     std::is_same<T, u16>::value ||
+                     std::is_same<T, u32>::value ||
+                     std::is_same<T, u64>::value ||
+                     std::is_same<T, double>::value ||
+                     std::is_same<T, float>::value;
+
+// Representation of a vector register of a given width (Bits). This is meant to
+// replace the built-in types __uint128_t and intrisic types which are usually
+// implemented as array of smaller types (e.g. u256 is u32[4]). which makes
+// comparison, access and assignment difficult.
+template<size_t Bits>
+class vec {
+    // Vector registers only come in the following sizes: 64 bits (MMX), 128
+    // bits (XMM) and 256 bits (YMM). For now we do not support AVX512.
+    static_assert(Bits == 64 || Bits == 128 || Bits == 256,
+                  "Invalid vector register width");
+public:
+    // Default value of a vector register: all bytes are zeroed.
+    vec() {
+        ::memset(m_data, 0, bytes);
+    }
+
+    // Create a vector from an array of bytes. This constructure assumes that
+    // data contains at least `this::bytes` elements.
+    // @param data: The data to initialize the vector with.
+    vec(u8 const * const data) {
+        ::memcpy(m_data, data, bytes);
+    }
+
+    // Construct a vector register values from a list of elements to be packed
+    // in the vector reg. Each element must be of the same type (e.g u8, u16,
+    // ...) and the number of elements must add up to the size of the vec
+    // register.
+    // @param high...rest: The elements of the vec register, in "big endian" e.g
+    // the first value represents the value of the high/most-significant
+    // element in the vector.
+    template<typename A, typename... Args>
+    requires ((std::is_same<A, Args>::value && ...) && isPackable<A> &&
+              ((1 + sizeof...(Args)) * sizeof(A) * 8 == Bits))
+    vec(A high, Args ...rest) {
+        initArray(high, rest...);
+    }
+
+    // The size of the vector in granularity of T's.
+    // Note: Enabling the requires below seems to trigger a bug with clang.
+    template<typename T> // requires isPackable<T>
+    static constexpr u64 size = Bits / (sizeof(T) * 8);
+
+    // The size of the vector in bytes.
+    static constexpr u64 bytes = size<u8>;
+
+    // Access an element in the vec register (non-const).
+    // @param index: The index of the element to access.
+    // @return: Reference to the index'th element of type T in the vec register.
+    template<typename T> requires isPackable<T>
+    T& elem(u8 const index) {
+        assert(index < size<T>);
+        return *(reinterpret_cast<T*>(m_data) + index);
+    }
+
+    // Access an element in the vec register (const).
+    // @param index: The index of the element to access.
+    // @return: Const reference to the index'th element of type T in the vec
+    // register.
+    template<typename T> requires isPackable<T>
+    T const& elem(u8 const index) const {
+        assert(index < size<T>);
+        return *(reinterpret_cast<T const*>(m_data) + index);
+    }
+
+    // Compare two vector register of the same width. Let the compiler defines
+    // this for us.
+    bool operator==(vec<Bits> const& other) const = default;
+
+private:
+    // The underlying data of the register.
+    u8 m_data[size<u8>];
+
+    // Internal - Initialize the m_data array recursively. This function is
+    // meant to be called by the constructor. As such it makes the following
+    // assumptions:
+    //  - The size of the arguments is <= size of the vector.
+    //  - All arguments are of the same type.
+    template<typename A, typename... Args>
+    void initArray(A first, Args ...rest) {
+        u8 const currIndex(sizeof...(Args));
+        elem<A>(currIndex) = first;
+        initArray(rest...);
+    }
+
+    // Base case for initArray when the argument list is empty.
+    void initArray() {}
+};
+
+// Some shortcuts for the common vector register widths.
+using vec64 = vec<64>;
+using vec128 = vec<128>;
+using vec256 = vec<256>;
+
 namespace X86Lab {
 
 // Custom exception types.
@@ -178,51 +282,27 @@ void setFpu(int const vcpuFd, kvm_fpu const& fpu);
 // fish the register values we are interested in, without having to compute the
 // specific offsets needed within kvm_xsave.region[].
 struct XSaveArea {
-    union {
-        kvm_xsave _kvmXSave;
-        struct {
-            // Legacy xsave region:
-            // x87 FPU state. FIXME: Add support.
-            u64 : 64;
-            u64 : 64;
-            u64 : 64;
+    // Default ctor - set all state to 0.
+    XSaveArea();
 
-            // SSE's MXCSR and MXCSR_MASK.
-            u32 mxcsr;
-            u32 mxcsrMask;
+    // Create a XSaveArea.
+    // @param xsave: The xsave data returned by KVM_GET_XSAVE2.
+    XSaveArea(kvm_xsave const& xsave);
 
-            // MMX registers. The 64 bits following each register in the
-            // XSAVE area is half x87 FPU half reserved. Ignore.
-            u64 mm0; u64 : 64;
-            u64 mm1; u64 : 64;
-            u64 mm2; u64 : 64;
-            u64 mm3; u64 : 64;
-            u64 mm4; u64 : 64;
-            u64 mm5; u64 : 64;
-            u64 mm6; u64 : 64;
-            u64 mm7; u64 : 64;
+    // Update a kvm_xsave struct with the state contained in this XSaveArea.
+    // This essentially implements the inverse of the constructor taking a
+    // kvm_xsave as parameter.
+    // @param xsave: Pointer to the kvm_xsave to be updated.
+    void fillKvmXSave(kvm_xsave * const xsave) const;
 
-            // XMM registers.
-            u128 xmm[16];
-
-            // Padding of the legacy Xsave area until offset 512, reserved.
-            u8 ignored[96];
-
-            // Xsave header:
-            // The state-component bitmap indicating what state is present in
-            // this xsave area.
-            u8 xstateBv;
-        } __attribute__((packed));
-    } __attribute__((packed));
-    // The YMM registers ... unfortunately we cannot know for sure in advance at
-    // which offsets the YMM registers (technically their higher half) will be
-    // stored in the kvm_xsave. This is because at hardware level the offset is
-    // given by cpuid. Hence we cannot 'overlay' with an union to access those.
-    // KVM's doc indicates that the kvm_xsave region has the same layout
-    // described by cpuid lead 0xD on the host.
-    // For now duplicate the YMM register state here. This structure should be
-    // reworked to avoid such duplication. FIXME!
-    u256 ymm[16];
+    // The MMX registers.
+    vec64 mmx[8];
+    // SSE's MXCSR register and its mask.
+    u32 mxcsr;
+    u32 mxcsrMask;
+    // The YMM registers, also contains the XMM registers in their lower 128
+    // bits.
+    vec256 ymm[16];
 } __attribute__((packed));
 
 // Get the vcpu's XSAVE area. This calls the KVM_GET_XSAVE2 ioctl.

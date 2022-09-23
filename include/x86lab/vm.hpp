@@ -75,6 +75,9 @@ public:
             // bits in this struct.
             u256 ymm[16];
 
+            // Default constructor - all registers are set to 0.
+            Registers();
+
             // Build a Registers from KVM's data structures.
             // @param regs: The value of general purpose registers.
             // @param sregs: The value of special registers.

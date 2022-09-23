@@ -4,6 +4,9 @@
 
 namespace X86Lab {
 
+Vm::State::Registers::Registers() :
+    Vm::State::Registers::Registers({}, {}, Util::Kvm::XSaveArea()) {}
+
 Vm::State::Registers::Registers(kvm_regs const& regs,
                                 kvm_sregs const& sregs,
                                 Util::Kvm::XSaveArea const& xsave) :
@@ -24,19 +27,21 @@ Vm::State::Registers::Registers(kvm_regs const& regs,
     gdt({.base = sregs.gdt.base, .limit = sregs.gdt.limit}),
 
     // MMX registers are aliased with old x87 FPU registers.
-    mm0(xsave.mm0), mm1(xsave.mm1),
-    mm2(xsave.mm2), mm3(xsave.mm3),
-    mm4(xsave.mm4), mm5(xsave.mm5),
-    mm6(xsave.mm6), mm7(xsave.mm7),
+    mm0(xsave.mmx[0].elem<u64>(0)), mm1(xsave.mmx[1].elem<u64>(0)),
+    mm2(xsave.mmx[2].elem<u64>(0)), mm3(xsave.mmx[3].elem<u64>(0)),
+    mm4(xsave.mmx[4].elem<u64>(0)), mm5(xsave.mmx[5].elem<u64>(0)),
+    mm6(xsave.mmx[6].elem<u64>(0)), mm7(xsave.mmx[7].elem<u64>(0)),
 
     mxcsr(xsave.mxcsr) {
     for (u8 i(0); i < 16; ++i) {
-        xmm[i] = xsave.xmm[i];
+        xmm[i] = (u128(xsave.ymm[i].elem<u64>(1)) << 64) |
+                 u128(xsave.ymm[i].elem<u64>(0));
     }
 
     for (u8 i(0); i < 16; ++i) {
-        ymm[i][0] = xsave.ymm[i][0];
-        ymm[i][1] = xsave.ymm[i][1];
+        ymm[i][0] = xmm[i];
+        ymm[i][1] = (u128(xsave.ymm[i].elem<u64>(3)) << 64) |
+            u128(xsave.ymm[i].elem<u64>(2));
     }
 }
 
@@ -166,14 +171,14 @@ void Vm::setRegisters(State::Registers const& registerValues) {
 
     std::unique_ptr<Util::Kvm::XSaveArea> xsave(Util::Kvm::getXSave(m_vcpuFd));
     // Set the MMX registers.
-    xsave->mm0 = registerValues.mm0;
-    xsave->mm1 = registerValues.mm1;
-    xsave->mm2 = registerValues.mm2;
-    xsave->mm3 = registerValues.mm3;
-    xsave->mm4 = registerValues.mm4;
-    xsave->mm5 = registerValues.mm5;
-    xsave->mm6 = registerValues.mm6;
-    xsave->mm7 = registerValues.mm7;
+    xsave->mmx[0].elem<u64>(0) = registerValues.mm0;
+    xsave->mmx[1].elem<u64>(0) = registerValues.mm1;
+    xsave->mmx[2].elem<u64>(0) = registerValues.mm2;
+    xsave->mmx[3].elem<u64>(0) = registerValues.mm3;
+    xsave->mmx[4].elem<u64>(0) = registerValues.mm4;
+    xsave->mmx[5].elem<u64>(0) = registerValues.mm5;
+    xsave->mmx[6].elem<u64>(0) = registerValues.mm6;
+    xsave->mmx[7].elem<u64>(0) = registerValues.mm7;
 
     // MXCSR_MASK indicates the writable bits in MXCSR.
     xsave->mxcsr = registerValues.mxcsr & xsave->mxcsrMask;
@@ -182,9 +187,11 @@ void Vm::setRegisters(State::Registers const& registerValues) {
     for (u8 i(0); i < 16; ++i) {
         // FIXME: Having YMM and XMM stored separately is a receipe for
         // disaster.
-        xsave->xmm[i] = registerValues.xmm[i];
-        xsave->ymm[i][0] = registerValues.ymm[i][0];
-        xsave->ymm[i][1] = registerValues.ymm[i][1];
+        xsave->ymm[i].elem<u64>(0) = registerValues.xmm[i];
+        xsave->ymm[i].elem<u64>(1) = registerValues.xmm[i] >> 64;
+
+        xsave->ymm[i].elem<u64>(2) = registerValues.ymm[i][1];
+        xsave->ymm[i].elem<u64>(3) = registerValues.ymm[i][1] >> 64;
     }
 
     Util::Kvm::setXSave(m_vcpuFd, *xsave);

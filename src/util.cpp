@@ -190,45 +190,100 @@ u16 getMaxMemSlots(int const vmFd) {
     return max;
 }
 
+XSaveArea::XSaveArea() {
+    for (u8 i(0); i < 8; ++i) {
+        mmx[i] = vec64(u32(0), u32(0));
+    }
+    mxcsr = 0;
+    mxcsrMask = 0;
+    for (u8 i(0); i < 16; ++i) {
+        ymm[i] = vec256(u64(0), u64(0), u64(0), u64(0));
+    }
+}
+
+XSaveArea::XSaveArea(kvm_xsave const& xsave) {
+    u8 const * const state(reinterpret_cast<u8 const*>(xsave.region));
+
+    // Per Intel's reference vol. 1, chapter 13-6, the offset of the state of
+    // the FPU are:
+    //  - MMX registers: MMi is @ 32 + 16 * i.
+    //  - XMM registers (also low half of YMM register): XMMi is @ 160 + 16 * i.
+    //  - High half of YMM register: $(cpuid(eax = 0xD, ecx = 2).ebx) + 16 * i.
+
+    for (u8 i(0); i < 8; ++i) {
+        u8 const * const mmxRegData(state + 32 + 16 * i);
+        mmx[i] = vec64(mmxRegData);
+    }
+
+    u32 const ymmHighHalfOffset(Extension::cpuid(0xD, 0x2).ebx);
+    for (u8 i(0); i < 16; ++i) {
+        // The two QWORDs making the lower half of YMMi.
+        u8 const * const xmmRegData(state + 160 + 16 * i);
+        u64 const xmmL(*reinterpret_cast<u64 const*>(xmmRegData));
+        u64 const xmmH(*reinterpret_cast<u64 const*>(xmmRegData + 8));
+
+        // The two QWORDs making the highe half of YMMi.
+        u8 const * const ymmHighHalfData(state + ymmHighHalfOffset + 16 * i);
+        u64 const ymmHL(*reinterpret_cast<u64 const*>(ymmHighHalfData));
+        u64 const ymmHH(*reinterpret_cast<u64 const*>(ymmHighHalfData + 8));
+
+        ymm[i] = vec256(ymmHH, ymmHL, xmmH, xmmL);
+    }
+
+    mxcsr = *reinterpret_cast<u32 const*>(state + 24);
+    mxcsrMask = *reinterpret_cast<u32 const*>(state + 28);
+}
+
+void XSaveArea::fillKvmXSave(kvm_xsave * const xsave) const {
+    u8 * const state(reinterpret_cast<u8*>(xsave->region));
+
+    for (u8 i(0); i < 8; ++i) {
+        u64 * const mmxRegData(reinterpret_cast<u64*>(state + 32 + 16 * i));
+        *mmxRegData = mmx[i].elem<u64>(0);
+    }
+
+    u32 const ymmHighOffset(Extension::cpuid(0xD, 0x2).ebx);
+    for (u8 i(0); i < 16; ++i) {
+        u64 * const xmmRegData(reinterpret_cast<u64*>(state + 160 + 16 * i));
+        u64 * const ymmHighData(
+            reinterpret_cast<u64*>(state + ymmHighOffset + 16 * i));
+
+        xmmRegData[0] = ymm[i].elem<u64>(0);
+        xmmRegData[1] = ymm[i].elem<u64>(1);
+        ymmHighData[0] = ymm[i].elem<u64>(2);
+        ymmHighData[1] = ymm[i].elem<u64>(3);
+    }
+
+    *reinterpret_cast<u32*>(state + 24) = mxcsr;
+    *reinterpret_cast<u32*>(state + 28) = mxcsrMask;
+}
+
 std::unique_ptr<XSaveArea> getXSave(int const vcpuFd) {
-    // We have to read into a kvm_xsave and then copy into the XSaveArea due to
-    // packing not allowing us to get a direct pointer to XSaveArea::_kvmXSave.
     kvm_xsave xsave{};
     if (::ioctl(vcpuFd, KVM_GET_XSAVE2, &xsave) == -1) {
         throw KvmError("Cannot get guest XSAVE state", errno);
     }
-    std::unique_ptr<XSaveArea> res(new XSaveArea);
-    res->_kvmXSave = xsave;
-
-    // The KVM API does not set the state-component bitmap of the XSAVE area,
-    // e.g. it is left to 0. We need to set it ourselves in order for setXSave
-    // to actually write the registers we want.
-    // The first 2 bits of xstateBv indicate the presence of the state for x87
-    // and SSE respectively. Bit 2 indicates the presence of AVX state.
-    res->xstateBv |= 0x7;
-
-    // Manually set the ymm copies in XSaveArea. FIXME!.
-    // Offset at which the YMM0_H-YMM15_H are stored in the xsave area.
-    u32 const ymmOffset(Extension::cpuid(0xD, 0x2).ebx);
-    u8 const * const ymmState(reinterpret_cast<u8*>(xsave.region) + ymmOffset);
-    for (u32 i(0); i < 16; ++i) {
-        res->ymm[i][0] = res->xmm[i];
-        res->ymm[i][1] = *(reinterpret_cast<u128 const*>(ymmState) + i);
-    }
-    return res;
+    return std::unique_ptr<XSaveArea>(new XSaveArea(xsave));
 }
 
 void setXSave(int const vcpuFd, XSaveArea const& xsave) {
-    // As with getXSave, we have to use a temporary kvm_xsave due to packing not
-    // allowing us to get a direct pointer to XSaveArea::_kvmXSave.
-    kvm_xsave kx(xsave._kvmXSave);
-
-    // Manually set the ymm state in kvm_xsave. FIXME!
-    u32 const ymmOffset(Extension::cpuid(0xD, 0x2).ebx);
-    u8 * const rawYmmState(reinterpret_cast<u8*>(kx.region) + ymmOffset);
-    for (u32 i(0); i < 16; ++i) {
-        std::memcpy(rawYmmState + i * 16, &xsave.ymm[i][1], 16);
+    // Read the current state of XSave so that we only overwrite the state
+    // supported by XSaveArea while leaving the other bits unchanged.
+    kvm_xsave kx;
+    if (::ioctl(vcpuFd, KVM_GET_XSAVE2, &kx) == -1) {
+        throw KvmError("Cannot get guest XSAVE state", errno);
     }
+
+    // Update the state per XSaveArea.
+    xsave.fillKvmXSave(&kx);
+
+    // The KVM API does not set the state-component bitmap of the XSAVE area,
+    // e.g. it is left to 0. We need to set it ourselves in order for
+    // KVM_SET_XSAVE to actually write the registers we want.
+    // The first 2 bits of xstateBv indicate the presence of the state for x87
+    // and SSE respectively. Bit 2 indicates the presence of AVX state.
+    u8 * const xstateBv(reinterpret_cast<u8*>(kx.region) + 512);
+    *xstateBv |= 0x7;
 
     if (::ioctl(vcpuFd, KVM_SET_XSAVE, &kx) != 0) {
         throw KvmError("Cannot set guest XSAVE state", errno);

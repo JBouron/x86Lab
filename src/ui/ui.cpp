@@ -36,7 +36,7 @@ Snapshot::Registers State::prevRegisters() const {
     if (m_latestSnapshot->hasBase()) {
         return m_latestSnapshot->base()->registers();
     } else {
-        return Snapshot::Registers({}, {}, {});
+        return Snapshot::Registers();
     }
 }
 
