@@ -26,22 +26,17 @@ Vm::State::Registers::Registers(kvm_regs const& regs,
     idt({.base = sregs.idt.base, .limit = sregs.idt.limit}),
     gdt({.base = sregs.gdt.base, .limit = sregs.gdt.limit}),
 
-    // MMX registers are aliased with old x87 FPU registers.
-    mm0(xsave.mmx[0].elem<u64>(0)), mm1(xsave.mmx[1].elem<u64>(0)),
-    mm2(xsave.mmx[2].elem<u64>(0)), mm3(xsave.mmx[3].elem<u64>(0)),
-    mm4(xsave.mmx[4].elem<u64>(0)), mm5(xsave.mmx[5].elem<u64>(0)),
-    mm6(xsave.mmx[6].elem<u64>(0)), mm7(xsave.mmx[7].elem<u64>(0)),
-
     mxcsr(xsave.mxcsr) {
     for (u8 i(0); i < 16; ++i) {
-        xmm[i] = (u128(xsave.ymm[i].elem<u64>(1)) << 64) |
-                 u128(xsave.ymm[i].elem<u64>(0));
+        mmx[i] = xsave.mmx[i];
     }
 
     for (u8 i(0); i < 16; ++i) {
-        ymm[i][0] = xmm[i];
-        ymm[i][1] = (u128(xsave.ymm[i].elem<u64>(3)) << 64) |
-            u128(xsave.ymm[i].elem<u64>(2));
+        xmm[i] = vec128(xsave.ymm[i].elem<u64>(1), xsave.ymm[i].elem<u64>(0));
+    }
+
+    for (u8 i(0); i < 16; ++i) {
+        ymm[i] = xsave.ymm[i];
     }
 }
 
@@ -171,27 +166,16 @@ void Vm::setRegisters(State::Registers const& registerValues) {
 
     std::unique_ptr<Util::Kvm::XSaveArea> xsave(Util::Kvm::getXSave(m_vcpuFd));
     // Set the MMX registers.
-    xsave->mmx[0].elem<u64>(0) = registerValues.mm0;
-    xsave->mmx[1].elem<u64>(0) = registerValues.mm1;
-    xsave->mmx[2].elem<u64>(0) = registerValues.mm2;
-    xsave->mmx[3].elem<u64>(0) = registerValues.mm3;
-    xsave->mmx[4].elem<u64>(0) = registerValues.mm4;
-    xsave->mmx[5].elem<u64>(0) = registerValues.mm5;
-    xsave->mmx[6].elem<u64>(0) = registerValues.mm6;
-    xsave->mmx[7].elem<u64>(0) = registerValues.mm7;
+    for (u8 i(0); i < 16; ++i) {
+        xsave->mmx[i] = registerValues.mmx[i];
+    }
 
     // MXCSR_MASK indicates the writable bits in MXCSR.
     xsave->mxcsr = registerValues.mxcsr & xsave->mxcsrMask;
 
     // Set the XMM and YMM registers.
     for (u8 i(0); i < 16; ++i) {
-        // FIXME: Having YMM and XMM stored separately is a receipe for
-        // disaster.
-        xsave->ymm[i].elem<u64>(0) = registerValues.xmm[i];
-        xsave->ymm[i].elem<u64>(1) = registerValues.xmm[i] >> 64;
-
-        xsave->ymm[i].elem<u64>(2) = registerValues.ymm[i][1];
-        xsave->ymm[i].elem<u64>(3) = registerValues.ymm[i][1] >> 64;
+        xsave->ymm[i] = registerValues.ymm[i];
     }
 
     Util::Kvm::setXSave(m_vcpuFd, *xsave);

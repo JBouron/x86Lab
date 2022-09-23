@@ -97,6 +97,18 @@ public:
     // this for us.
     bool operator==(vec<Bits> const& other) const = default;
 
+    // Check if a vector is non-zero.
+    // @return true: If the vector contains at least one byte != 0, false
+    // otherwise.
+    explicit operator bool() const {
+        for (u8 i(0); i < size<u64>; ++i) {
+            if (!!elem<u64>(i)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
 private:
     // The underlying data of the register.
     u8 m_data[size<u8>];

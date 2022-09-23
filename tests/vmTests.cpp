@@ -619,14 +619,14 @@ DECLARE_TEST(testSetRegisters) {
     expected.rflags ^= (1 << 9);
 
     // Set the MMX registers to some arbitrary values.
-    expected.mm0 = 0x0101010101010101;
-    expected.mm1 = 0x0202020202020202;
-    expected.mm2 = 0x0303030303030303;
-    expected.mm3 = 0x0404040404040404;
-    expected.mm4 = 0x0505050505050505;
-    expected.mm5 = 0x0606060606060606;
-    expected.mm6 = 0x0707070707070707;
-    expected.mm7 = 0x0808080808080808;
+    expected.mmx[0] = u64(0x0101010101010101ULL);
+    expected.mmx[1] = u64(0x0202020202020202ULL);
+    expected.mmx[2] = u64(0x0303030303030303ULL);
+    expected.mmx[3] = u64(0x0404040404040404ULL);
+    expected.mmx[4] = u64(0x0505050505050505ULL);
+    expected.mmx[5] = u64(0x0606060606060606ULL);
+    expected.mmx[6] = u64(0x0707070707070707ULL);
+    expected.mmx[7] = u64(0x0808080808080808ULL);
 
     expected.mxcsr ^= (3 << 13);
 
@@ -634,15 +634,11 @@ DECLARE_TEST(testSetRegisters) {
     for (u8 i(0); i < 16; ++i) {
         u64 const high(0x1111111111111111ULL * i);
         u64 const low(~high);
-        u128 val(high);
-        val <<= 64;
-        val |= low;
-        expected.xmm[i] = val;
+        expected.xmm[i] = vec128(high, low);
         // FIXME: XMM and YMM are supposed to share some bits. However in the
         // Registers struct this is not the case, hence we need to make sure
         // that YMMi[128:0] == XMMi.
-        expected.ymm[i][0] = val;
-        expected.ymm[i][1] = ~val;
+        expected.ymm[i] = vec256(~high, ~low, high, low);
     }
 
     // Set the registers on the VM.
@@ -864,14 +860,14 @@ DECLARE_TEST(testReadMmxRegisters) {
     auto const checkRegs([&](u64 mm0, u64 mm1, u64 mm2, u64 mm3,
                              u64 mm4, u64 mm5, u64 mm6, u64 mm7) {
         X86Lab::Vm::State::Registers const regs(vm->getRegisters());
-        TEST_ASSERT(regs.mm0 == mm0);
-        TEST_ASSERT(regs.mm1 == mm1);
-        TEST_ASSERT(regs.mm2 == mm2);
-        TEST_ASSERT(regs.mm3 == mm3);
-        TEST_ASSERT(regs.mm4 == mm4);
-        TEST_ASSERT(regs.mm5 == mm5);
-        TEST_ASSERT(regs.mm6 == mm6);
-        TEST_ASSERT(regs.mm7 == mm7);
+        TEST_ASSERT(regs.mmx[0] == mm0);
+        TEST_ASSERT(regs.mmx[1] == mm1);
+        TEST_ASSERT(regs.mmx[2] == mm2);
+        TEST_ASSERT(regs.mmx[3] == mm3);
+        TEST_ASSERT(regs.mmx[4] == mm4);
+        TEST_ASSERT(regs.mmx[5] == mm5);
+        TEST_ASSERT(regs.mmx[6] == mm6);
+        TEST_ASSERT(regs.mmx[7] == mm7);
     });
 
     // Step the VM multiple times, asserting everytime that the VM remains
@@ -940,7 +936,7 @@ DECLARE_TEST(testMmxInstruction) {
     // to 0xFFFF.
     u64 const expected(0xD96BE9B9FFFFCDF5);
 
-    u64 const mm0(vm->getRegisters().mm0);
+    u64 const mm0(vm->getRegisters().mmx[0].elem<u64>(0));
     TEST_ASSERT(mm0 == expected);
 }
 
@@ -1002,12 +998,24 @@ DECLARE_TEST(testReadXmmRegisters) {
     std::unique_ptr<X86Lab::Vm> const vm(
         createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly));
 
-    // Check the XMM registers against the expected values.
-    // @param exp: The expected value of each XMM register.
-    auto const checkRegs([&](u128 const * const expected) {
+    // Asserts the values of the XMM registers.
+    // @param idx: The index of the XMM register which is expected to contain
+    // the 128-bit word.
+    // If only XMM_idx contains the word and every other XMM register is 0 then
+    // the check is passing, otherwise this is an assert failure.
+    auto const checkRegs([&](u8 const idx) {
+        // The high and low 128-bit word of the 256-bit word written into the
+        // YMM registers.
+        u64 const high(0xDEADBEEFCAFEBABEULL);
+        u64 const low(0xF00F1337CA7D0516ULL);
         X86Lab::Vm::State::Registers const regs(vm->getRegisters());
         for (u8 i(0); i < 16; ++i) {
-            TEST_ASSERT(regs.xmm[i] == expected[i]);
+            if (i == idx) {
+                TEST_ASSERT(regs.xmm[i].elem<u64>(0) == low);
+                TEST_ASSERT(regs.xmm[i].elem<u64>(1) == high);
+            } else {
+                TEST_ASSERT(!regs.xmm[i]);
+            }
         }
     });
 
@@ -1025,18 +1033,9 @@ DECLARE_TEST(testReadXmmRegisters) {
     // Run the prelogue.
     runVm(8);
 
-    // Need to construct the expected value manually since we cannot just put a
-    // 128 constant in code.
-    u128 v(0xDEADBEEFCAFEBABE);
-    v <<= 64;
-    v |= 0xF00F1337CA7D0516ULL;
-    // Holds the expected values of each XMM register.
-    u128 exp[16] = {0};
     for (u8 i(0); i < 16; ++i) {
-        exp[i] = v;
-        checkRegs(exp);
+        checkRegs(i);
         // The register will be overwritten with 0 on the next instruction.
-        exp[i] = 0;
         if (i < 15) {
             // Only run if we did not check the last register.
             runVm(2);
@@ -1130,20 +1129,19 @@ DECLARE_TEST(testReadYmmRegisters) {
     auto const checkRegs([&](u8 const idx) {
         // The high and low 128-bit word of the 256-bit word written into the
         // YMM registers.
-        u128 high(0xDEADBEEFCAFEBABEULL);
-        high <<= 64;
-        high |= 0xF00F1337CA7D0516ULL;
-        u128 low(0xABCDEF0123456789ULL);
-        low <<= 64;
-        low |= 0xF1E2D3C4B5A69788ULL;
+        u64 const hh(0xDEADBEEFCAFEBABEULL);
+        u64 const hl(0xF00F1337CA7D0516ULL);
+        u64 const lh(0xABCDEF0123456789ULL);
+        u64 const ll(0xF1E2D3C4B5A69788ULL);
         X86Lab::Vm::State::Registers const regs(vm->getRegisters());
         for (u8 i(0); i < 16; ++i) {
             if (i == idx) {
-                TEST_ASSERT(regs.ymm[i][0] == low);
-                TEST_ASSERT(regs.ymm[i][1] == high);
+                TEST_ASSERT(regs.ymm[i].elem<u64>(0) == ll);
+                TEST_ASSERT(regs.ymm[i].elem<u64>(1) == lh);
+                TEST_ASSERT(regs.ymm[i].elem<u64>(2) == hl);
+                TEST_ASSERT(regs.ymm[i].elem<u64>(3) == hh);
             } else {
-                TEST_ASSERT(!regs.ymm[i][0]);
-                TEST_ASSERT(!regs.ymm[i][1]);
+                TEST_ASSERT(!regs.ymm[i]);
             }
         }
     });

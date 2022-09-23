@@ -52,20 +52,13 @@ public:
             Table gdt;
 
             // MMX registers.
-            u64 mm0;
-            u64 mm1;
-            u64 mm2;
-            u64 mm3;
-            u64 mm4;
-            u64 mm5;
-            u64 mm6;
-            u64 mm7;
+            vec64 mmx[8];
 
             // SSE's MXCSR register.
             u32 mxcsr;
 
             // XMM registers.
-            u128 xmm[16];
+            vec128 xmm[16];
 
             // TODO: Include floating point registers.
 
@@ -73,7 +66,7 @@ public:
             // FIXME: YMM regs are aliased to their XMM reg for the bottom 128
             // bits. We could save a lot of space by deduplicating those bottom
             // bits in this struct.
-            u256 ymm[16];
+            vec256 ymm[16];
 
             // Default constructor - all registers are set to 0.
             Registers();

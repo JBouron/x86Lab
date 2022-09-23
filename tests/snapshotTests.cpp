@@ -44,14 +44,14 @@ static std::unique_ptr<X86Lab::Vm::State> genRandomState(u64 const memSize) {
     regs.efer = generator();
     regs.idt = { .base = generator(), .limit = static_cast<u16>(generator()) };
     regs.gdt = { .base = generator(), .limit = static_cast<u16>(generator()) };
-    regs.mm0 = generator();
-    regs.mm1 = generator();
-    regs.mm2 = generator();
-    regs.mm3 = generator();
-    regs.mm4 = generator();
-    regs.mm5 = generator();
-    regs.mm6 = generator();
-    regs.mm7 = generator();
+    regs.mmx[0] = generator();
+    regs.mmx[1] = generator();
+    regs.mmx[2] = generator();
+    regs.mmx[3] = generator();
+    regs.mmx[4] = generator();
+    regs.mmx[5] = generator();
+    regs.mmx[6] = generator();
+    regs.mmx[7] = generator();
 
     TEST_ASSERT(!(memSize % 8));
 
