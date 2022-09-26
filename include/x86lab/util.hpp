@@ -216,6 +216,20 @@ namespace Kvm {
 // @throws: A X86Lab::Error in case /dev/kvm cannot be opened.
 int getKvmHandle();
 
+// Check if the KVM module support a certain extension. This essentially calls
+// the KVM_CHECK_EXTENSION ioctl.
+// @param fd: The file descriptor on which to invoke KVM_CHECK_EXTENSION.
+// @param capability: The capability to check for.
+// @throws: A KvmError in case of error.
+// @return: The value returned by ::ioctl(fd, KVM_CHECK_EXTENSION, capability).
+int checkExtension(int const fd, int const capability);
+
+// Asserts that an extension is supported on the host's KVM API. If the required
+// extension is not supported, a KvmError is thrown.
+// @param fd: The file descriptor on which to invoke KVM_CHECK_EXTENSION.
+// @param capability: The capability to check for.
+void requiresExension(int const fd, int const capability);
+
 // Create a KVM VM.
 // @param kvmHandle: File descriptor on /dev/kvm for ioctl calls.
 // @return: The file descriptor associated to the created VM.

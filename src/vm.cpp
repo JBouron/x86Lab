@@ -58,8 +58,16 @@ Vm::Vm(CpuMode const startMode, u64 const memorySize) :
     m_kvmRun(Util::Kvm::getVcpuRunStruct(m_vcpuFd)),
     m_physicalMemorySize(memorySize * PAGE_SIZE),
     m_memory(std::get<0>(addPhysicalMemory(memorySize))),
-    m_currState(OperatingState::NoCodeLoaded)
-    {
+    m_currState(OperatingState::NoCodeLoaded) {
+
+    // We require some Kvm extension to implement some of the features of this
+    // class. Check that all extension are supported on the host's KVM API now
+    // instead of doing it at every corresponding KVM_* ioctl later.
+    Util::Kvm::requiresExension(m_vmFd, KVM_CAP_X86_MSR_FILTER);
+    Util::Kvm::requiresExension(m_vmFd, KVM_CAP_NR_MEMSLOTS);
+    Util::Kvm::requiresExension(m_vmFd, KVM_CAP_XSAVE);
+    Util::Kvm::requiresExension(m_vmFd, KVM_CAP_XCRS);
+
     // Disable any MSR access filtering. KVM's doc indicate that if this is not
     // done then the default behaviour is used. However it's not really clear if
     // the default behaviour allows access to MSRs or not. Hence disable it here

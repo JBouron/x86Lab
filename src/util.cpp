@@ -88,6 +88,25 @@ int getKvmHandle() {
     return kvmHandle;
 }
 
+int checkExtension(int const fd, int const capability) {
+    int const res(::ioctl(fd, KVM_CHECK_EXTENSION, capability));
+    if (res == -1) {
+        // KVM_CHECK_EXTENSION either returns 0 if the extension is not
+        // supported or an integer >= 1 if it is.
+        // -1 indicates an error.
+        throw KvmError("Error calling KVM_CHECK_EXTENSION", errno);
+    } else {
+        return res;
+    }
+}
+
+void requiresExension(int const fd, int const capability) {
+    if (!checkExtension(fd, capability)) {
+        throw KvmError(("Required extension " + std::to_string(capability) +
+            " not supported").c_str(), errno);
+    }
+}
+
 int createVm() {
     int const vmFd(::ioctl(getKvmHandle(), KVM_CREATE_VM, 0));
     if (vmFd == -1) {
@@ -183,11 +202,7 @@ void setSRegs(int const vcpuFd, kvm_sregs const& regs) {
 }
 
 u16 getMaxMemSlots(int const vmFd) {
-    int const max(::ioctl(vmFd, KVM_CHECK_EXTENSION, KVM_CAP_NR_MEMSLOTS, 0));
-    if (max == -1) {
-        throw KvmError("Error while calling KVM_CAP_NR_MEMSLOTS: ", errno);
-    }
-    return max;
+    return checkExtension(vmFd, KVM_CAP_NR_MEMSLOTS);
 }
 
 XSaveArea::XSaveArea() {
