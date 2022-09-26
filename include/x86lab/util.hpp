@@ -304,7 +304,7 @@ kvm_fpu getFpu(int const vcpuFd);
 // @throws: A KvmError in case of error.
 void setFpu(int const vcpuFd, kvm_fpu const& fpu);
 
-// Memory layout of the XSAVE area returned by KVM_GET_XSAVE2. This is used to
+// Memory layout of the XSAVE area returned by KVM_GET_XSAVE. This is used to
 // fish the register values we are interested in, without having to compute the
 // specific offsets needed within kvm_xsave.region[].
 struct XSaveArea {
@@ -312,7 +312,7 @@ struct XSaveArea {
     XSaveArea();
 
     // Create a XSaveArea.
-    // @param xsave: The xsave data returned by KVM_GET_XSAVE2.
+    // @param xsave: The xsave data returned by KVM_GET_XSAVE.
     XSaveArea(kvm_xsave const& xsave);
 
     // Update a kvm_xsave struct with the state contained in this XSaveArea.
@@ -331,7 +331,7 @@ struct XSaveArea {
     vec256 ymm[16];
 } __attribute__((packed));
 
-// Get the vcpu's XSAVE area. This calls the KVM_GET_XSAVE2 ioctl.
+// Get the vcpu's XSAVE area. This calls the KVM_GET_XSAVE ioctl.
 // @param vcpuFd: The file descriptor of the target vcpu.
 // @return: A XSaveArea containing the vcpu's current XSAVE.
 // @throws: A KvmError in case of error.

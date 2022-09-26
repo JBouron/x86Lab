@@ -275,7 +275,7 @@ void XSaveArea::fillKvmXSave(kvm_xsave * const xsave) const {
 
 std::unique_ptr<XSaveArea> getXSave(int const vcpuFd) {
     kvm_xsave xsave{};
-    if (::ioctl(vcpuFd, KVM_GET_XSAVE2, &xsave) == -1) {
+    if (::ioctl(vcpuFd, KVM_GET_XSAVE, &xsave) == -1) {
         throw KvmError("Cannot get guest XSAVE state", errno);
     }
     return std::unique_ptr<XSaveArea>(new XSaveArea(xsave));
@@ -285,7 +285,7 @@ void setXSave(int const vcpuFd, XSaveArea const& xsave) {
     // Read the current state of XSave so that we only overwrite the state
     // supported by XSaveArea while leaving the other bits unchanged.
     kvm_xsave kx;
-    if (::ioctl(vcpuFd, KVM_GET_XSAVE2, &kx) == -1) {
+    if (::ioctl(vcpuFd, KVM_GET_XSAVE, &kx) == -1) {
         throw KvmError("Cannot get guest XSAVE state", errno);
     }
 
