@@ -1,5 +1,7 @@
 #include <x86lab/ui/tui.hpp>
 #include <fstream>
+#include <sstream>
+#include <iomanip>
 
 namespace X86Lab::Ui {
 
@@ -37,6 +39,9 @@ Tui::Tui() {
     logWin = ::new Window(logWinR, logWinC, logWinTitle);
     logWin->move(codeWinR + gapSize * 2, gapSize);
     logWin->enableScrolling(true);
+
+    // Start with General purpose mode.
+    m_currentMode = RegisterWindowMode::GeneralPurpose;
 }
 
 Tui::~Tui() {
@@ -57,13 +62,31 @@ Action Tui::doWaitForNextAction() {
             return Action::ReverseStep;
         } else if (nextChar == 'q') {
             return Action::Quit;
+        } else if (nextChar == KEY_LEFT || nextChar == KEY_RIGHT) {
+            cycleTabs(nextChar == KEY_RIGHT);
         }
         nextChar = regWin->getChar();
     }
 }
 
+void Tui::cycleTabs(bool const toRight) {
+    int const curr(static_cast<int>(m_currentMode));
+    int const max(static_cast<int>(RegisterWindowMode::NumRegisterWindowMode));
+    bool const needUpdate((toRight && curr != max - 1) || (!toRight && !!curr));
+    if (needUpdate) {
+        int const delta(toRight ? 1 : -1);
+        m_currentMode = static_cast<RegisterWindowMode>(curr + delta);
+
+        // Show the new tab.
+        doUpdateRegWin(prevRegs, currRegs);
+        refresh();
+    }
+}
+
 void Tui::doUpdate(State const& newState) {
-    doUpdateRegWin(newState.prevRegisters(), newState.registers());
+    prevRegs = newState.prevRegisters();
+    currRegs = newState.registers();
+    doUpdateRegWin(prevRegs, currRegs);
 
     u64 const currLine(newState.currentLine());
     if (!!currLine) {
@@ -72,11 +95,49 @@ void Tui::doUpdate(State const& newState) {
     refresh();
 }
 
+// Get the title for a RegisterWindowMode.
+// @param mode: The mode to get the title for.
+std::string Tui::titleForRegisterWindowMode(RegisterWindowMode const& mode) {
+    switch (mode) {
+        case RegisterWindowMode::GeneralPurpose:
+            return "Registers [General Purpose]";
+        case RegisterWindowMode::FpuMmx:
+            return "Registers [FPU & MMX]";
+        case RegisterWindowMode::NumRegisterWindowMode:
+            throw Error("NumRegisterWindowMode is not a valid mode", 0);
+        default:
+            throw Error("Unsupported RegisterWindowMode", 0);
+    }
+}
+
 void Tui::doUpdateRegWin(Snapshot::Registers const& prevRegs,
                          Snapshot::Registers const& newRegs) {
     Window& w(*regWin);
     w.clearAndResetCursor();
 
+    // Update the title of the registers window depending on the mode.
+    regWin->setTitle(titleForRegisterWindowMode(m_currentMode));
+
+    switch (m_currentMode) {
+        case RegisterWindowMode::GeneralPurpose:
+            doUpdateRegWinGp(prevRegs, newRegs);
+            break;
+        case RegisterWindowMode::FpuMmx:
+            doUpdateRegWinFpuMmx(prevRegs, newRegs);
+            break;
+        case RegisterWindowMode::NumRegisterWindowMode:
+            throw Error("NumRegisterWindowMode is not a valid mode", 0);
+            break;
+        default:
+            throw Error("Unsupported RegisterWindowMode", 0);
+    }
+}
+
+void Tui::doUpdateRegWinGp(Snapshot::Registers const& prevRegs,
+                           Snapshot::Registers const& newRegs) {
+    assert(m_currentMode == RegisterWindowMode::GeneralPurpose);
+
+    Window& w(*regWin);
     Snapshot::Registers const& p(prevRegs);
     Snapshot::Registers const& n(newRegs);
 
@@ -166,6 +227,55 @@ void Tui::doUpdateRegWin(Snapshot::Registers const& prevRegs,
     w << buf;
 }
 
+// Pretty print a vector register of width W in elements of type T.
+// @param vec: The vector to pretty print.
+// @return: The string representation of `vec` in elements of T separated by
+// spaces.
+template<size_t W, typename T>
+static std::string vecToString(vec<W> const& vec) {
+    u32 const elemWidth(sizeof(T) * 8);
+    assert(!(W % elemWidth));
+    u32 const numElems(W / elemWidth);
+
+    std::ostringstream oss;
+    oss << std::hex;
+    for (int i(numElems - 1); i >=0; --i) {
+        oss << std::setfill('0') << std::setw(elemWidth / 4);
+        oss << (u64)vec.template elem<T>(i);
+        if (!!i) {
+            oss << " ";
+        }
+    }
+    return oss.str();
+}
+
+void Tui::doUpdateRegWinFpuMmx(Snapshot::Registers const& prevRegs,
+                               Snapshot::Registers const& newRegs) {
+    assert(m_currentMode == RegisterWindowMode::FpuMmx);
+
+    Window& w(*regWin);
+    Snapshot::Registers const& p(prevRegs);
+    Snapshot::Registers const& n(newRegs);
+
+    char const * const sep("  |  ");
+    for (u8 i(0); i < 8; ++i) {
+        w << "mm" << std::to_string(i).c_str() << " = ";
+        w << vecToString<64, u64>(p.mmx[i]).c_str() << sep;
+        w << vecToString<64, u32>(p.mmx[i]).c_str() << sep;
+        w << vecToString<64, u16>(p.mmx[i]).c_str() << sep;
+        w << vecToString<64, u8>(p.mmx[i]).c_str() << "\n";
+        w << " +--> ";
+        w << vecToString<64, u64>(n.mmx[i]).c_str() << sep;
+        w << vecToString<64, u32>(n.mmx[i]).c_str() << sep;
+        w << vecToString<64, u16>(n.mmx[i]).c_str() << sep;
+        w << vecToString<64, u8>(n.mmx[i]).c_str() << "\n";
+
+        if (i < 7) {
+            w << "\n";
+        }
+    }
+}
+
 void Tui::doUpdateCodeWin(std::string const& fileName, u64 const currLine) {
     std::ifstream file(fileName, std::ios::in);
     std::string line;
@@ -242,6 +352,22 @@ void Tui::Window::enableScrolling(bool const enabled) {
     ::scrollok(m_win, enabled);
     if (enabled) {
         ::wsetscrreg(m_win, 0, m_height);
+    }
+}
+
+void Tui::Window::setTitle(std::string const& newTitle) {
+    std::string const withPad(std::string(" ") + newTitle + " ");
+
+    // Only refresh the m_win and m_borderWin if the title actually changed to
+    // avoid flickering as much as possible.
+    if (m_title != withPad) {
+        m_title = withPad;
+        ::wborder(m_borderWin, '|', '|', '-', '-', '+', '+', '+', '+');
+        ::mvwprintw(m_borderWin, 0, titleOffset, "%s", m_title.c_str());
+        ::wrefresh(m_borderWin);
+        // The refresh above destroyed the m_win area. We need to completely
+        // re-draw it.
+        ::redrawwin(m_win);
     }
 }
 }
