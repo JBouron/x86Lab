@@ -174,6 +174,53 @@ private:
 
     RegisterWindowMode m_currentMode;
 
+    // Check if the register window is currently showing vector registers.
+    // @return: true if the current tab of the register window contains vector
+    // registers, false otherwise.
+    bool isRegWindowShowingVectorRegisters() const;
+
+    // Vector registers can usually be interpreted in different ways: Packed
+    // bytes, words, dwords, ... or packed single / double precision fp.
+    // To save screen-space only a single form / granularity is printed in the
+    // register window at a time. The user can then toggle the granularity as
+    // they please.
+    enum class VectorRegisterGranularity {
+        // Packed integers.
+        Byte,
+        Word,
+        Dword,
+        Qword,
+        // Packed floating point values.
+        Float,
+        Double,
+        // Value of the entire vector register interpreted as one big unsigned
+        // integer.
+        Full,
+
+        // Must be last.
+        NumVectorRegisterGranularity,
+    };
+    // The current granularity of vector registers displayed in the register
+    // window.
+    VectorRegisterGranularity m_currentGranularity;
+
+    // Helper function to get the string representation of a vector register in
+    // a particular granularity.
+    // @param vec: The vector register to represent as a string.
+    // @param granularity: The VectorRegisterGranularity granularity to use in
+    // the representation.
+    // @return: A string representing the current value of the vector register
+    // in the given granularity. Each element (e.g packed byte, word, ...) is
+    // separated by a space.
+    template<size_t W>
+    static std::string vecRegToString(
+        vec<W> const& vec,
+        VectorRegisterGranularity const granularity);
+
+    // Update the current granularity to the next one following the order in
+    // VectorRegisterGranularity.
+    void cycleGranularity();
+
     // Width and height of the window, as a percentage of the terminal's width
     // and height. The layout of the TUI backend is as follows (not to scale):
     // +---------+---------+

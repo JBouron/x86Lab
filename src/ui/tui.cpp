@@ -2,6 +2,7 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <limits>
 
 namespace X86Lab::Ui {
 
@@ -64,6 +65,8 @@ Action Tui::doWaitForNextAction() {
             return Action::Quit;
         } else if (nextChar == KEY_LEFT || nextChar == KEY_RIGHT) {
             cycleTabs(nextChar == KEY_RIGHT);
+        } else if (nextChar == '\t') {
+            cycleGranularity();
         }
         nextChar = regWin->getChar();
     }
@@ -78,6 +81,20 @@ void Tui::cycleTabs(bool const toRight) {
         m_currentMode = static_cast<RegisterWindowMode>(curr + delta);
 
         // Show the new tab.
+        doUpdateRegWin(prevRegs, currRegs);
+        refresh();
+    }
+}
+
+void Tui::cycleGranularity() {
+    int const curr(static_cast<int>(m_currentGranularity));
+    int const max(static_cast<int>(
+        VectorRegisterGranularity::NumVectorRegisterGranularity));
+    m_currentGranularity =
+        static_cast<VectorRegisterGranularity>((curr + 1) % max);
+    if (isRegWindowShowingVectorRegisters()) {
+        // Since the current register window tab is showing vector registers we
+        // need to update its content to reflect the new granularity.
         doUpdateRegWin(prevRegs, currRegs);
         refresh();
     }
@@ -108,6 +125,10 @@ std::string Tui::titleForRegisterWindowMode(RegisterWindowMode const& mode) {
         default:
             throw Error("Unsupported RegisterWindowMode", 0);
     }
+}
+
+bool Tui::isRegWindowShowingVectorRegisters() const {
+    return m_currentMode == RegisterWindowMode::FpuMmx;
 }
 
 void Tui::doUpdateRegWin(Snapshot::Registers const& prevRegs,
@@ -229,24 +250,65 @@ void Tui::doUpdateRegWinGp(Snapshot::Registers const& prevRegs,
 
 // Pretty print a vector register of width W in elements of type T.
 // @param vec: The vector to pretty print.
+// @param separator: The string to use between each element in the string
+// representation of the vector register.
 // @return: The string representation of `vec` in elements of T separated by
 // spaces.
 template<size_t W, typename T>
-static std::string vecToString(vec<W> const& vec) {
+static std::string vecToStr(vec<W> const& vec, std::string const& separator) {
     u32 const elemWidth(sizeof(T) * 8);
     assert(!(W % elemWidth));
     u32 const numElems(W / elemWidth);
 
     std::ostringstream oss;
-    oss << std::hex;
+    if constexpr (!std::is_same_v<T, float> && !std::is_same_v<T, double>) {
+        oss << std::hex;
+    }
     for (int i(numElems - 1); i >=0; --i) {
-        oss << std::setfill('0') << std::setw(elemWidth / 4);
-        oss << (u64)vec.template elem<T>(i);
+        if constexpr (!std::is_same_v<T, float> && !std::is_same_v<T, double>) {
+            oss << std::setfill('0');
+            oss << std::setw(elemWidth / 4);
+            // Need the cast to u64 in the case of packed bytes representation
+            // to avoid printing characters.
+            oss << (u64)vec.template elem<T>(i);
+        } else {
+            // In float or double, use the max precision possible.
+            static_assert(std::is_same_v<T, float>||std::is_same_v<T, double>);
+            int const digits(std::numeric_limits<T>::digits10);
+            oss.precision(digits);
+            oss << vec.template elem<T>(i);
+        }
         if (!!i) {
-            oss << " ";
+            oss << separator;
         }
     }
     return oss.str();
+}
+
+template<size_t W>
+std::string Tui::vecRegToString(
+    vec<W> const& vec,
+    VectorRegisterGranularity const granularity) {
+    switch (granularity) {
+        case VectorRegisterGranularity::Byte:
+            return vecToStr<W, u8>(vec, " ");
+        case VectorRegisterGranularity::Word:
+            return vecToStr<W, u16>(vec, " ");
+        case VectorRegisterGranularity::Dword:
+            return vecToStr<W, u32>(vec, " ");
+        case VectorRegisterGranularity::Qword:
+            return vecToStr<W, u64>(vec, " ");
+        case VectorRegisterGranularity::Float:
+            return vecToStr<W, float>(vec, " ");
+        case VectorRegisterGranularity::Double:
+            return vecToStr<W, double>(vec, " ");
+        case VectorRegisterGranularity::Full:
+            // Re-use packed bytes representation with no space in between
+            // elements.
+            return vecToStr<W, u8>(vec, "");
+        default:
+            throw Error("Invalid VectorRegisterGranularity", 0);
+    }
 }
 
 void Tui::doUpdateRegWinFpuMmx(Snapshot::Registers const& prevRegs,
@@ -257,18 +319,25 @@ void Tui::doUpdateRegWinFpuMmx(Snapshot::Registers const& prevRegs,
     Snapshot::Registers const& p(prevRegs);
     Snapshot::Registers const& n(newRegs);
 
-    char const * const sep("  |  ");
+    VectorRegisterGranularity granularity;
+    if (m_currentGranularity == VectorRegisterGranularity::Float ||
+        m_currentGranularity == VectorRegisterGranularity::Double ||
+        m_currentGranularity == VectorRegisterGranularity::Full) {
+        // MMX registers only hold packed integers. Full is equivalent to Qword
+        // hence use Qword granularity in those cases.
+        granularity = VectorRegisterGranularity::Qword;
+    } else {
+        granularity = m_currentGranularity;
+    }
+
     for (u8 i(0); i < 8; ++i) {
         w << "mm" << std::to_string(i).c_str() << " = ";
-        w << vecToString<64, u64>(p.mmx[i]).c_str() << sep;
-        w << vecToString<64, u32>(p.mmx[i]).c_str() << sep;
-        w << vecToString<64, u16>(p.mmx[i]).c_str() << sep;
-        w << vecToString<64, u8>(p.mmx[i]).c_str() << "\n";
+        std::string repr;
+        repr = vecRegToString(p.mmx[i], granularity);
+        w << repr.c_str() << "\n";
         w << " +--> ";
-        w << vecToString<64, u64>(n.mmx[i]).c_str() << sep;
-        w << vecToString<64, u32>(n.mmx[i]).c_str() << sep;
-        w << vecToString<64, u16>(n.mmx[i]).c_str() << sep;
-        w << vecToString<64, u8>(n.mmx[i]).c_str() << "\n";
+        repr = vecRegToString(n.mmx[i], granularity);
+        w << repr.c_str()<< "\n";
 
         if (i < 7) {
             w << "\n";
