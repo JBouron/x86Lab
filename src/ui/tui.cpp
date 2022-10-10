@@ -120,6 +120,8 @@ std::string Tui::titleForRegisterWindowMode(RegisterWindowMode const& mode) {
             return "Registers [General Purpose]";
         case RegisterWindowMode::FpuMmx:
             return "Registers [FPU & MMX]";
+        case RegisterWindowMode::SseAvx:
+            return "Registers [SSE & AVX]";
         case RegisterWindowMode::NumRegisterWindowMode:
             throw Error("NumRegisterWindowMode is not a valid mode", 0);
         default:
@@ -128,7 +130,8 @@ std::string Tui::titleForRegisterWindowMode(RegisterWindowMode const& mode) {
 }
 
 bool Tui::isRegWindowShowingVectorRegisters() const {
-    return m_currentMode == RegisterWindowMode::FpuMmx;
+    return m_currentMode == RegisterWindowMode::FpuMmx ||
+        m_currentMode == RegisterWindowMode::SseAvx;
 }
 
 void Tui::doUpdateRegWin(Snapshot::Registers const& prevRegs,
@@ -145,6 +148,9 @@ void Tui::doUpdateRegWin(Snapshot::Registers const& prevRegs,
             break;
         case RegisterWindowMode::FpuMmx:
             doUpdateRegWinFpuMmx(prevRegs, newRegs);
+            break;
+        case RegisterWindowMode::SseAvx:
+            doUpdateRegWinSseAvx(prevRegs, newRegs);
             break;
         case RegisterWindowMode::NumRegisterWindowMode:
             throw Error("NumRegisterWindowMode is not a valid mode", 0);
@@ -332,14 +338,31 @@ void Tui::doUpdateRegWinFpuMmx(Snapshot::Registers const& prevRegs,
 
     for (u8 i(0); i < 8; ++i) {
         w << "mm" << std::to_string(i).c_str() << " = ";
-        std::string repr;
-        repr = vecRegToString(p.mmx[i], granularity);
-        w << repr.c_str() << "\n";
+        w << vecRegToString(p.mmx[i], granularity).c_str() << "\n";
         w << " +--> ";
-        repr = vecRegToString(n.mmx[i], granularity);
-        w << repr.c_str()<< "\n";
+        w << vecRegToString(n.mmx[i], granularity).c_str() << "\n";
 
         if (i < 7) {
+            w << "\n";
+        }
+    }
+}
+
+void Tui::doUpdateRegWinSseAvx(Snapshot::Registers const& prevRegs,
+                            Snapshot::Registers const& newRegs) {
+    assert(m_currentMode == RegisterWindowMode::SseAvx);
+
+    Window& w(*regWin);
+    Snapshot::Registers const& p(prevRegs);
+    Snapshot::Registers const& n(newRegs);
+
+    for (u8 i(0); i < 16; ++i) {
+        w << "ymm" << std::to_string(i).c_str() << (i < 10 ? " " : "") << " = ";
+        w << vecRegToString(p.ymm[i], m_currentGranularity).c_str() << "\n";
+        w << " +----> ";
+        w << vecRegToString(n.ymm[i], m_currentGranularity).c_str() << "\n";
+
+        if (i < 15) {
             w << "\n";
         }
     }

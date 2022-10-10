@@ -45,6 +45,13 @@ private:
     void doUpdateRegWinFpuMmx(Snapshot::Registers const& prevRegs,
                               Snapshot::Registers const& newRegs);
  
+    // Helper function for doUpdateRegWin when the current mode is set to
+    // SseAvx.
+    // @param prevRegs: Previous register values.
+    // @param newRegs: Latest register values.
+    void doUpdateRegWinSseAvx(Snapshot::Registers const& prevRegs,
+                              Snapshot::Registers const& newRegs);
+
     // Update the code window.
     // @param fileName: The source code file path.
     // @param currLine: line number of the current instruction. The code window
@@ -163,6 +170,8 @@ private:
         GeneralPurpose,
         // Fpu registers and MMX.
         FpuMmx,
+        // SSE registers XMM0-15.
+        SseAvx,
 
         // Must be the last value.
         NumRegisterWindowMode,
@@ -232,8 +241,8 @@ private:
     // +---------+---------+
     // |       LOGS        |
     // +---------+---------+
-    static constexpr float codeWinWidth = 0.5;
-    static constexpr float codeWinHeight = 0.75;
+    static constexpr float codeWinWidth = 0.50;
+    static constexpr float codeWinHeight = 0.85;
     static constexpr float regWinWidth = 1.0 - codeWinWidth;
     static constexpr float regWinHeight = codeWinHeight;
     static constexpr float logWinWidth = 1.0;
