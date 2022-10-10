@@ -153,17 +153,28 @@ void disableMsrFiltering(int const vmFd) {
 }
 
 void setupCpuid(int const vcpuFd) {
-    // FIXME: We should somehow guess what this number should be. Maybe by
-    // repeatedly calling the ioctl and increasing it every time it fails?
-    size_t const nent(64);
-    size_t const structSize(
-        sizeof(kvm_cpuid2) + nent * sizeof(kvm_cpuid_entry2));
-    kvm_cpuid2 * const kvmCpuid(
-        reinterpret_cast<kvm_cpuid2*>(malloc(structSize)));
-    std::memset(kvmCpuid, 0x0, structSize);
-    assert(!!kvmCpuid);
-    kvmCpuid->nent = nent;
-    if (::ioctl(getKvmHandle(), KVM_GET_SUPPORTED_CPUID, kvmCpuid) == -1) {
+    size_t nent(32);
+    kvm_cpuid2 * kvmCpuid(nullptr);
+    // KVM_GET_SUPPORTED_CPUID is a bit weird as we need to pass it a kvm_cpuid2
+    // that is big enough to contain the result. Essentially we are left to
+    // guess the value of kvm_cpuid2::nent needed.
+    // Per the KVM docs, if nent is too small, E2BIG is returned; conversely if
+    // nent is too bit ENOMEM is returned. Hence start with a base nent and
+    // double it until the dest is big enough to contain the data.
+    int ret(0);
+    do {
+        // If the struct was allocated in a previous run, then free it. First
+        // iteration is fine as free(NULL) is allowed.
+        free(kvmCpuid);
+        size_t const structSize(
+            sizeof(kvm_cpuid2) + nent * sizeof(kvm_cpuid_entry2));
+        kvmCpuid = reinterpret_cast<kvm_cpuid2*>(malloc(structSize));
+        std::memset(kvmCpuid, 0x0, structSize);
+        kvmCpuid->nent = nent;
+        ret = ::ioctl(getKvmHandle(), KVM_GET_SUPPORTED_CPUID, kvmCpuid);
+        nent *= 2;
+    } while (ret == -1 && errno == E2BIG);
+    if (ret != 0) {
         throw KvmError("Failed to get supported CPUID", errno);
     }
 
