@@ -639,6 +639,34 @@ DECLARE_TEST(testSetRegisters) {
         // Registers struct this is not the case, hence we need to make sure
         // that YMMi[128:0] == XMMi.
         expected.ymm[i] = vec256(~high, ~low, high, low);
+        // FIXME: Dedup Ymm0-15 and Zmm0-15 registers.
+        expected.zmm[i].elem<u64>(0) = low;
+        expected.zmm[i].elem<u64>(1) = high;
+        expected.zmm[i].elem<u64>(2) = ~low;
+        expected.zmm[i].elem<u64>(3) = ~high;
+        expected.zmm[i].elem<u64>(4) = 0xDEADDAEDBEEEEEEFULL;
+        expected.zmm[i].elem<u64>(5) = 0xCAAAAAAAAFEEEEEEULL;
+        expected.zmm[i].elem<u64>(6) = 0xBAAAAAAAAAAAAABEULL;
+        expected.zmm[i].elem<u64>(7) = 0xFFEFEFEFEFEAFAFAULL;
+    }
+
+    // Set the top ZMM registers.
+    for (u8 i(16); i < 32; ++i) {
+        u64 const val(0xDEADBEEFCAFEBABE * i);
+        // Quick and dirty way to get """"""random"""""" numbers.
+        expected.zmm[i].elem<u64>(0) = val * __LINE__;
+        expected.zmm[i].elem<u64>(1) = val * __LINE__;
+        expected.zmm[i].elem<u64>(2) = val * __LINE__;
+        expected.zmm[i].elem<u64>(3) = val * __LINE__;
+        expected.zmm[i].elem<u64>(4) = val * __LINE__;
+        expected.zmm[i].elem<u64>(5) = val * __LINE__;
+        expected.zmm[i].elem<u64>(6) = val * __LINE__;
+        expected.zmm[i].elem<u64>(7) = val * __LINE__;
+    }
+
+    // Set opmask regs.
+    for (u8 i(0); i < 8; ++i) {
+        expected.k[i] = 0xDEADBEEFCAFEBABE * i;
     }
 
     // Set the registers on the VM.
@@ -1146,6 +1174,235 @@ DECLARE_TEST(testReadYmmRegisters) {
         checkRegs(i);
         runVm(1);
         // Run the second vmovdqu zero'ing the reg.
+    }
+}
+
+// Check that getRegisters() returns the correct values of Zmm registers.
+DECLARE_TEST(testReadZmmRegisters) {
+    std::string const assembly(R"(
+        BITS 64
+
+        ; Push 2 512 values onto the stack, to be loaded in zmm registers, one
+        ; 0 (rsp + 64) and another with an arbitrary value (rsp).
+        xor     rax, rax
+
+        ; 512-bit word 0x0.
+        push    rax
+        push    rax
+        push    rax
+        push    rax
+        push    rax
+        push    rax
+        push    rax
+        push    rax
+
+        ; 512-bit word
+        ;   0xDEADBEEFCAFEBABEF00F1337CA7D0516ABCDEF0123456789F1E2D3C4B5A69788..
+        ;   ..1029384756574839ABCEFFEACDBEFCBA1122334455667788A1B2C3D4E5F66F5E
+        ; Don't even try to find an easter-egg, there is none.
+        mov     rax, 0xDEADBEEFCAFEBABE
+        push    rax
+        mov     rax, 0xF00F1337CA7D0516
+        push    rax
+        mov     rax, 0xABCDEF0123456789
+        push    rax
+        mov     rax, 0xF1E2D3C4B5A69788
+        push    rax
+        mov     rax, 0x1029384756574839
+        push    rax
+        mov     rax, 0xABCEFFEACDBEFCBA
+        push    rax
+        mov     rax, 0x1122334455667788
+        push    rax
+        mov     rax, 0xA1B2C3D4E5F66F5E
+        push    rax
+
+        vmovdqu64 zmm0, [rsp]
+        vmovdqu64 zmm0, [rsp + 64]
+        vmovdqu64 zmm1, [rsp]
+        vmovdqu64 zmm1, [rsp + 64]
+        vmovdqu64 zmm2, [rsp]
+        vmovdqu64 zmm2, [rsp + 64]
+        vmovdqu64 zmm3, [rsp]
+        vmovdqu64 zmm3, [rsp + 64]
+        vmovdqu64 zmm4, [rsp]
+        vmovdqu64 zmm4, [rsp + 64]
+        vmovdqu64 zmm5, [rsp]
+        vmovdqu64 zmm5, [rsp + 64]
+        vmovdqu64 zmm6, [rsp]
+        vmovdqu64 zmm6, [rsp + 64]
+        vmovdqu64 zmm7, [rsp]
+        vmovdqu64 zmm7, [rsp + 64]
+        vmovdqu64 zmm8, [rsp]
+        vmovdqu64 zmm8, [rsp + 64]
+        vmovdqu64 zmm9, [rsp]
+        vmovdqu64 zmm9, [rsp + 64]
+
+        vmovdqu64 zmm10, [rsp]
+        vmovdqu64 zmm10, [rsp + 64]
+        vmovdqu64 zmm11, [rsp]
+        vmovdqu64 zmm11, [rsp + 64]
+        vmovdqu64 zmm12, [rsp]
+        vmovdqu64 zmm12, [rsp + 64]
+        vmovdqu64 zmm13, [rsp]
+        vmovdqu64 zmm13, [rsp + 64]
+        vmovdqu64 zmm14, [rsp]
+        vmovdqu64 zmm14, [rsp + 64]
+        vmovdqu64 zmm15, [rsp]
+        vmovdqu64 zmm15, [rsp + 64]
+        vmovdqu64 zmm16, [rsp]
+        vmovdqu64 zmm16, [rsp + 64]
+        vmovdqu64 zmm17, [rsp]
+        vmovdqu64 zmm17, [rsp + 64]
+        vmovdqu64 zmm18, [rsp]
+        vmovdqu64 zmm18, [rsp + 64]
+        vmovdqu64 zmm19, [rsp]
+        vmovdqu64 zmm19, [rsp + 64]
+
+        vmovdqu64 zmm20, [rsp]
+        vmovdqu64 zmm20, [rsp + 64]
+        vmovdqu64 zmm21, [rsp]
+        vmovdqu64 zmm21, [rsp + 64]
+        vmovdqu64 zmm22, [rsp]
+        vmovdqu64 zmm22, [rsp + 64]
+        vmovdqu64 zmm23, [rsp]
+        vmovdqu64 zmm23, [rsp + 64]
+        vmovdqu64 zmm24, [rsp]
+        vmovdqu64 zmm24, [rsp + 64]
+        vmovdqu64 zmm25, [rsp]
+        vmovdqu64 zmm25, [rsp + 64]
+        vmovdqu64 zmm26, [rsp]
+        vmovdqu64 zmm26, [rsp + 64]
+        vmovdqu64 zmm27, [rsp]
+        vmovdqu64 zmm27, [rsp + 64]
+        vmovdqu64 zmm28, [rsp]
+        vmovdqu64 zmm28, [rsp + 64]
+        vmovdqu64 zmm29, [rsp]
+        vmovdqu64 zmm29, [rsp + 64]
+
+        vmovdqu64 zmm30, [rsp]
+        vmovdqu64 zmm30, [rsp + 64]
+        vmovdqu64 zmm31, [rsp]
+        vmovdqu64 zmm31, [rsp + 64]
+        nop
+        hlt
+    )");
+    std::unique_ptr<X86Lab::Vm> const vm(
+        createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly));
+
+    // Step the VM multiple times, asserting everytime that the VM remains
+    // Runnable.
+    // @param n: The number of steps to execute.
+    auto const runVm([&](u64 const n) {
+        for (u64 i(0); i < n; ++i) {
+            TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+        }
+    });
+
+    // Asserts the values of the ZMM registers.
+    // @param idx: The index of the ZMM register which is expected to contain
+    // the 512-bit value.
+    // If only ZMM_idx contains the word and every other ZMM register is 0 then
+    // the check is passing, otherwise this is an assert failure.
+    auto const checkRegs([&](u8 const idx) {
+        vec512 exp;
+        exp.elem<u64>(7) = 0xDEADBEEFCAFEBABEULL;
+        exp.elem<u64>(6) = 0xF00F1337CA7D0516ULL;
+        exp.elem<u64>(5) = 0xABCDEF0123456789ULL;
+        exp.elem<u64>(4) = 0xF1E2D3C4B5A69788ULL;
+        exp.elem<u64>(3) = 0x1029384756574839ULL;
+        exp.elem<u64>(2) = 0xABCEFFEACDBEFCBAULL;
+        exp.elem<u64>(1) = 0x1122334455667788ULL;
+        exp.elem<u64>(0) = 0xA1B2C3D4E5F66F5EULL;
+        X86Lab::Vm::State::Registers const regs(vm->getRegisters());
+        for (u8 i(0); i < 16; ++i) {
+            if (i == idx) {
+                TEST_ASSERT(regs.zmm[i] == exp);
+            } else {
+                TEST_ASSERT(!regs.zmm[i]);
+            }
+        }
+    });
+
+    // Run prologue.
+    runVm(25);
+
+    for (u8 i(0); i < 32; ++i) {
+        // Run the first vmovdqu64 setting the reg to the special value.
+        runVm(1);
+        checkRegs(i);
+        runVm(1);
+        // Run the second vmovdqu zero'ing the reg.
+    }
+}
+
+// Test that getRegisters() returns the correct values of the AVX512 opmask
+// regsiters.
+DECLARE_TEST(testReadOpmaskRegisters) {
+    std::string const assembly(R"(
+        BITS 64
+
+        ; AVX512 foundation only supports 16 bits masks max.
+        mov     eax, 0xDEAD
+        xor     ebx, ebx
+
+        kmovw   k0, eax
+        kmovw   k0, ebx
+        kmovw   k1, eax
+        kmovw   k1, ebx
+        kmovw   k2, eax
+        kmovw   k2, ebx
+        kmovw   k3, eax
+        kmovw   k3, ebx
+        kmovw   k4, eax
+        kmovw   k4, ebx
+        kmovw   k5, eax
+        kmovw   k5, ebx
+        kmovw   k6, eax
+        kmovw   k6, ebx
+        kmovw   k7, eax
+        kmovw   k7, ebx
+
+        nop
+        hlt
+    )");
+    std::unique_ptr<X86Lab::Vm> const vm(
+        createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly));
+
+    // Step the VM multiple times, asserting everytime that the VM remains
+    // Runnable.
+    // @param n: The number of steps to execute.
+    auto const runVm([&](u64 const n) {
+        for (u64 i(0); i < n; ++i) {
+            TEST_ASSERT(vm->step() == X86Lab::Vm::OperatingState::Runnable);
+        }
+    });
+
+    // Asserts the values of the opmask registers.
+    // @param idx: The index of the opmask register which is expected to contain
+    // the expected 16-bit value 0xDEAD.
+    // If only ki contains 0xDEAD and every other opmask register is 0 then
+    // the check is passing, otherwise this is an assert failure.
+    auto const checkRegs([&](u8 const idx) {
+        X86Lab::Vm::State::Registers const regs(vm->getRegisters());
+        for (u8 i(0); i < 8; ++i) {
+            if (i == idx) {
+                TEST_ASSERT(regs.k[i] == 0xDEAD);
+            } else {
+                TEST_ASSERT(!regs.k[i]);
+            }
+        }
+    });
+
+    // Run prologue.
+    runVm(2);
+
+    for (u8 i(0); i < 8; ++i) {
+        // Set the opmask register.
+        runVm(1);
+        checkRegs(i);
+        // Zero out the opmask register
+        runVm(1);
     }
 }
 }

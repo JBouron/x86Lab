@@ -71,6 +71,9 @@ bool hasSse4_1()    { return !!(cpuid(0x1, 0x0).ecx & (1 << 19)); }
 bool hasSse4_2()    { return !!(cpuid(0x1, 0x0).ecx & (1 << 20)); }
 bool hasAvx()       { return !!(cpuid(0x1, 0x0).ecx & (1 << 28)); }
 bool hasAvx2()      { return !!(cpuid(0x7, 0x0).ecx & (1 << 5));  }
+// Note: We do a crude check regarding AVX512 by only looking for AVX512
+// foundation instruction support.
+bool hasAvx512()    { return !!(cpuid(0x7, 0x0).ebx & (1 << 16)); }
 }
 
 namespace Kvm {
@@ -225,6 +228,13 @@ XSaveArea::XSaveArea() {
     for (u8 i(0); i < 16; ++i) {
         ymm[i] = vec256(u64(0), u64(0), u64(0), u64(0));
     }
+    for (u8 i(0); i < 32; ++i) {
+        zmm[i] = vec512(u64(0), u64(0), u64(0), u64(0),
+                        u64(0), u64(0), u64(0), u64(0));
+    }
+    for (u8 i(0); i < 8; ++i) {
+        k[i] = 0;
+    }
 }
 
 XSaveArea::XSaveArea(kvm_xsave const& xsave) {
@@ -258,6 +268,35 @@ XSaveArea::XSaveArea(kvm_xsave const& xsave) {
 
     mxcsr = *reinterpret_cast<u32 const*>(state + 24);
     mxcsrMask = *reinterpret_cast<u32 const*>(state + 28);
+
+    // AVX512:
+    //  - OPmasks: ki is @ $(cpuid(eax = 0xD, ecx = 5).ebx) + 8 * i
+    //  - ZMM_Hi256 is @ $(cpuid(eax = 0xD, ecx = 6).ebx) + 32 * i for the first
+    //  16 zmm registers since their low 256 bits are aliased with ymm
+    //  registers.
+    //  - ZMM 16 - 31 are @ $(cpuid(eax = 0xD, ecx = 7).ebx) + 64 * i.
+    // Opmasks
+    u32 const opMaskOffset(Extension::cpuid(0xD, 0x5).ebx);
+    for (u8 i(0); i < 8; ++i) {
+        k[i] = *(reinterpret_cast<u64 const*>(state + opMaskOffset + 8 * i));
+    }
+
+    // ZMM_Hi256.
+    u32 const zmmHighHalfOffset(Extension::cpuid(0xD, 0x6).ebx);
+    for (u8 i(0); i < 16; ++i) {
+        vec256 const high(*(reinterpret_cast<vec256 const*>(state + zmmHighHalfOffset + 32 * i)));
+        vec256 const low(ymm[i]);
+        for (u8 j(0); j < 4; ++j) {
+            zmm[i].elem<u64>(j) = low.elem<u64>(j);
+            zmm[i].elem<u64>(j + 4) = high.elem<u64>(j);
+        }
+    }
+
+    // Hi16_ZMM
+    u64 const highZmmOffset(Extension::cpuid(0xD, 0x7).ebx);
+    for (u8 i(0); i < 16; ++i) {
+        zmm[16 + i] = *(reinterpret_cast<vec512 const*>(state + highZmmOffset + 64 * i));
+    }
 }
 
 void XSaveArea::fillKvmXSave(kvm_xsave * const xsave) const {
@@ -282,6 +321,33 @@ void XSaveArea::fillKvmXSave(kvm_xsave * const xsave) const {
 
     *reinterpret_cast<u32*>(state + 24) = mxcsr;
     *reinterpret_cast<u32*>(state + 28) = mxcsrMask;
+
+    // AVX512:
+    //  - OPmasks: ki is @ $(cpuid(eax = 0xD, ecx = 5).ebx) + 8 * i
+    //  - ZMM_Hi256 is @ $(cpuid(eax = 0xD, ecx = 6).ebx) + 32 * i for the first
+    //  16 zmm registers since their low 256 bits are aliased with ymm
+    //  registers.
+    //  - ZMM 16 - 31 are @ $(cpuid(eax = 0xD, ecx = 7).ebx) + 64 * i.
+    u32 const opMaskOffset(Extension::cpuid(0xD, 0x5).ebx);
+    for (u8 i(0); i < 8; ++i) {
+        *(reinterpret_cast<u64*>(state + opMaskOffset + 8 * i)) = k[i];
+    }
+
+    // ZMM_Hi256.
+    u32 const zmmHighHalfOffset(Extension::cpuid(0xD, 0x6).ebx);
+    for (u8 i(0); i < 16; ++i) {
+        vec256 high;
+        for (u8 j(0); j < 4; ++j) {
+            high.elem<u64>(j) = zmm[i].elem<u64>(j + 4);
+        }
+        *(reinterpret_cast<vec256*>(state + zmmHighHalfOffset + 32 * i)) = high;
+    }
+
+    // Hi16_ZMM
+    u64 const highZmmOffset(Extension::cpuid(0xD, 0x7).ebx);
+    for (u8 i(0); i < 16; ++i) {
+        *(reinterpret_cast<vec512*>(state + highZmmOffset + 64 * i)) = zmm[16 + i];
+    }
 }
 
 std::unique_ptr<XSaveArea> getXSave(int const vcpuFd) {
@@ -307,9 +373,10 @@ void setXSave(int const vcpuFd, XSaveArea const& xsave) {
     // e.g. it is left to 0. We need to set it ourselves in order for
     // KVM_SET_XSAVE to actually write the registers we want.
     // The first 2 bits of xstateBv indicate the presence of the state for x87
-    // and SSE respectively. Bit 2 indicates the presence of AVX state.
+    // and SSE respectively. Bit 2 indicates the presence of AVX state. Bits 5
+    // to 7 indicates the presence of AVX512 state.
     u8 * const xstateBv(reinterpret_cast<u8*>(kx.region) + 512);
-    *xstateBv |= 0x7;
+    *xstateBv |= 0x7 | (1 << 5) | (1 << 6) | (1 << 7);
 
     if (::ioctl(vcpuFd, KVM_SET_XSAVE, &kx) != 0) {
         throw KvmError("Cannot set guest XSAVE state", errno);

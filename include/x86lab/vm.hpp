@@ -68,6 +68,11 @@ public:
             // bits in this struct.
             vec256 ymm[16];
 
+            // FIXME: Deduplicate lower 256 bits of ZMM0-15 with YMM0-15.
+            vec512 zmm[32];
+            // Opmasks for AVX512.
+            u64 k[8];
+
             // Default constructor - all registers are set to 0.
             Registers();
 

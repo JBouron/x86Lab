@@ -37,7 +37,7 @@ template<size_t Bits>
 class vec {
     // Vector registers only come in the following sizes: 64 bits (MMX), 128
     // bits (XMM) and 256 bits (YMM). For now we do not support AVX512.
-    static_assert(Bits == 64 || Bits == 128 || Bits == 256,
+    static_assert(Bits == 64 || Bits == 128 || Bits == 256 || Bits == 512,
                   "Invalid vector register width");
 public:
     // Default value of a vector register: all bytes are zeroed.
@@ -133,6 +133,7 @@ private:
 using vec64 = vec<64>;
 using vec128 = vec<128>;
 using vec256 = vec<256>;
+using vec512 = vec<512>;
 
 namespace X86Lab {
 
@@ -207,6 +208,7 @@ bool hasSse4_1();
 bool hasSse4_2();
 bool hasAvx();
 bool hasAvx2();
+bool hasAvx512();
 }
 
 // Collection of helper functions to interact with the KVM API.
@@ -329,6 +331,10 @@ struct XSaveArea {
     // The YMM registers, also contains the XMM registers in their lower 128
     // bits.
     vec256 ymm[16];
+    // ZMM registers from AVX512 extension. FIXME: Deduplicate with YMM.
+    vec512 zmm[32];
+    // Opmasks used by AVX512.
+    u64 k[8];
 } __attribute__((packed));
 
 // Get the vcpu's XSAVE area. This calls the KVM_GET_XSAVE ioctl.

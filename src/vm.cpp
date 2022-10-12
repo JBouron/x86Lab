@@ -38,6 +38,13 @@ Vm::State::Registers::Registers(kvm_regs const& regs,
     for (u8 i(0); i < 16; ++i) {
         ymm[i] = xsave.ymm[i];
     }
+
+    for (u8 i(0); i < 32; ++i) {
+        zmm[i] = xsave.zmm[i];
+    }
+    for (u8 i(0); i < 8; ++i) {
+        k[i] = xsave.k[i];
+    }
 }
 
 Vm::State::Registers const& Vm::State::registers() const {
@@ -184,6 +191,14 @@ void Vm::setRegisters(State::Registers const& registerValues) {
     // Set the XMM and YMM registers.
     for (u8 i(0); i < 16; ++i) {
         xsave->ymm[i] = registerValues.ymm[i];
+    }
+
+    // ZMM registers.
+    for (u8 i(0); i < 32; ++i) {
+        xsave->zmm[i] = registerValues.zmm[i];
+    }
+    for (u8 i(0); i < 8; ++i) {
+        xsave->k[i] = registerValues.k[i];
     }
 
     Util::Kvm::setXSave(m_vcpuFd, *xsave);
@@ -441,6 +456,17 @@ void Vm::enableCpuMode(kvm_sregs& sregs, CpuMode const mode) {
         // state in XSAVE.
         u64 const xcr0(Util::Kvm::getXcr0(m_vcpuFd));
         Util::Kvm::setXcr0(m_vcpuFd, xcr0 | 0x7);
+    }
+
+    // Setup AVX512.
+    if (Util::Extension::hasAvx512()) {
+        // Enable AVX-512 execution and save/restore through XSAVE in XCR0.
+        u64 const xcr0(Util::Kvm::getXcr0(m_vcpuFd));
+        // Set bits:
+        //  - XCR0.opmask (bit 5)
+        //  - XCR0.ZMM_Hi256 (bit 6)
+        //  - XCR0.Hi16_ZMM (bit 7)
+        Util::Kvm::setXcr0(m_vcpuFd, xcr0 | (1 << 5) | (1 << 6) | (1 << 7));
     }
 
     if (mode == CpuMode::LongMode) {
