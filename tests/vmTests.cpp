@@ -2,6 +2,7 @@
 #include <x86lab/code.hpp>
 #include <x86lab/test.hpp>
 #include <fstream>
+#include <random>
 
 // Various tests for the X86Lab::Vm.
 
@@ -558,6 +559,14 @@ DECLARE_TEST(testReadControlRegisters) {
     TEST_ASSERT(regs.efer == (prev.efer ^ (1 << 11)));
 }
 
+// Generate a "random" number. We always choose the same seed so the results is
+// deterministic.
+template<typename T>
+static T random() {
+    static std::mt19937_64 mt(0);
+    return T(mt());
+}
+
 // Check that Vm::setRegisters() actually set the registers to their correct
 // value. For now GP registers, control registers, GDTR and IDTR and XMM
 // registers  are tested. Segment registers are not tested here since changing
@@ -580,36 +589,36 @@ DECLARE_TEST(testSetRegisters) {
     X86Lab::Vm::State::Registers expected(vm->getRegisters());
 
     // Set GPs to arbitrary values.
-    expected.rax = 0x1111111111111111;
-    expected.rbx = 0x2222222222222222;
-    expected.rcx = 0x3333333333333333;
-    expected.rdx = 0x4444444444444444;
-    expected.rdi = 0x5555555555555555;
-    expected.rsi = 0x6666666666666666;
-    expected.rbp = 0x7777777777777777;
-    expected.rsp = 0x5656565656565656;
-    expected.r8  = 0x8888888888888888;
-    expected.r9  = 0x9999999999999999;
-    expected.r10 = 0xAAAAAAAAAAAAAAAA;
-    expected.r11 = 0xBBBBBBBBBBBBBBBB;
-    expected.r12 = 0xCCCCCCCCCCCCCCCC;
-    expected.r13 = 0xDDDDDDDDDDDDDDDD;
-    expected.r14 = 0xEEEEEEEEEEEEEEEE;
-    expected.r15 = 0xFFFFFFFFFFFFFFFF;
+    expected.rax = random<u64>();
+    expected.rbx = random<u64>();
+    expected.rcx = random<u64>();
+    expected.rdx = random<u64>();
+    expected.rdi = random<u64>();
+    expected.rsi = random<u64>();
+    expected.rbp = random<u64>();
+    expected.rsp = random<u64>();
+    expected.r8  = random<u64>();
+    expected.r9  = random<u64>();
+    expected.r10 = random<u64>();
+    expected.r11 = random<u64>();
+    expected.r12 = random<u64>();
+    expected.r13 = random<u64>();
+    expected.r14 = random<u64>();
+    expected.r15 = random<u64>();
 
     // Toggle the same bits in the control registers as
     // testReadControlRegisters.
     expected.cr0 ^= ((1 << 30) | (1 << 29));
-    expected.cr2 = 0xDEADBEEFCAFEBABE;
+    expected.cr2 = random<u64>();
     expected.cr3 ^= (1 << 3);
     expected.cr4 ^= (1 << 2);
     expected.cr8 ^= 0xF;
     expected.efer ^= (1 << 11);
 
-    expected.gdt.base = 0xFFFFFFF8CAFEBABE;
-    expected.gdt.limit = 0x8887;
-    expected.idt.base = 0xFFFFFFF8ABCDEF12;
-    expected.idt.limit = 0xABC7;
+    expected.gdt.base = random<u64>();
+    expected.gdt.limit = random<u16>();
+    expected.idt.base = random<u64>();
+    expected.idt.limit = random<u16>();
 
     // Set RIP to point to the nop instruction which is 8 bytes from the current
     // RIP.
@@ -619,54 +628,53 @@ DECLARE_TEST(testSetRegisters) {
     expected.rflags ^= (1 << 9);
 
     // Set the MMX registers to some arbitrary values.
-    expected.mmx[0] = u64(0x0101010101010101ULL);
-    expected.mmx[1] = u64(0x0202020202020202ULL);
-    expected.mmx[2] = u64(0x0303030303030303ULL);
-    expected.mmx[3] = u64(0x0404040404040404ULL);
-    expected.mmx[4] = u64(0x0505050505050505ULL);
-    expected.mmx[5] = u64(0x0606060606060606ULL);
-    expected.mmx[6] = u64(0x0707070707070707ULL);
-    expected.mmx[7] = u64(0x0808080808080808ULL);
+    expected.mmx[0] = random<u64>();
+    expected.mmx[1] = random<u64>();
+    expected.mmx[2] = random<u64>();
+    expected.mmx[3] = random<u64>();
+    expected.mmx[4] = random<u64>();
+    expected.mmx[5] = random<u64>();
+    expected.mmx[6] = random<u64>();
+    expected.mmx[7] = random<u64>();
 
     expected.mxcsr ^= (3 << 13);
 
     // XMM and YMM registers. Just some arbitrary patterns/values.
     for (u8 i(0); i < 16; ++i) {
-        u64 const high(0x1111111111111111ULL * i);
-        u64 const low(~high);
-        expected.xmm[i] = vec128(high, low);
+        expected.xmm[i] = vec128(random<u64>(), random<u64>());
         // FIXME: XMM and YMM are supposed to share some bits. However in the
         // Registers struct this is not the case, hence we need to make sure
         // that YMMi[128:0] == XMMi.
-        expected.ymm[i] = vec256(~high, ~low, high, low);
+        expected.ymm[i] = vec256(random<u64>(),
+                                 random<u64>(),
+                                 expected.xmm[i].elem<u64>(1),
+                                 expected.xmm[i].elem<u64>(0));
         // FIXME: Dedup Ymm0-15 and Zmm0-15 registers.
-        expected.zmm[i].elem<u64>(0) = low;
-        expected.zmm[i].elem<u64>(1) = high;
-        expected.zmm[i].elem<u64>(2) = ~low;
-        expected.zmm[i].elem<u64>(3) = ~high;
-        expected.zmm[i].elem<u64>(4) = 0xDEADDAEDBEEEEEEFULL;
-        expected.zmm[i].elem<u64>(5) = 0xCAAAAAAAAFEEEEEEULL;
-        expected.zmm[i].elem<u64>(6) = 0xBAAAAAAAAAAAAABEULL;
-        expected.zmm[i].elem<u64>(7) = 0xFFEFEFEFEFEAFAFAULL;
+        expected.zmm[i].elem<u64>(0) = expected.ymm[i].elem<u64>(0);
+        expected.zmm[i].elem<u64>(1) = expected.ymm[i].elem<u64>(1);
+        expected.zmm[i].elem<u64>(2) = expected.ymm[i].elem<u64>(2);
+        expected.zmm[i].elem<u64>(3) = expected.ymm[i].elem<u64>(3);
+        expected.zmm[i].elem<u64>(4) = random<u64>();
+        expected.zmm[i].elem<u64>(5) = random<u64>();
+        expected.zmm[i].elem<u64>(6) = random<u64>();
+        expected.zmm[i].elem<u64>(7) = random<u64>();
     }
 
     // Set the top ZMM registers.
     for (u8 i(16); i < 32; ++i) {
-        u64 const val(0xDEADBEEFCAFEBABE * i);
-        // Quick and dirty way to get """"""random"""""" numbers.
-        expected.zmm[i].elem<u64>(0) = val * __LINE__;
-        expected.zmm[i].elem<u64>(1) = val * __LINE__;
-        expected.zmm[i].elem<u64>(2) = val * __LINE__;
-        expected.zmm[i].elem<u64>(3) = val * __LINE__;
-        expected.zmm[i].elem<u64>(4) = val * __LINE__;
-        expected.zmm[i].elem<u64>(5) = val * __LINE__;
-        expected.zmm[i].elem<u64>(6) = val * __LINE__;
-        expected.zmm[i].elem<u64>(7) = val * __LINE__;
+        expected.zmm[i].elem<u64>(0) = random<u64>();
+        expected.zmm[i].elem<u64>(1) = random<u64>();
+        expected.zmm[i].elem<u64>(2) = random<u64>();
+        expected.zmm[i].elem<u64>(3) = random<u64>();
+        expected.zmm[i].elem<u64>(4) = random<u64>();
+        expected.zmm[i].elem<u64>(5) = random<u64>();
+        expected.zmm[i].elem<u64>(6) = random<u64>();
+        expected.zmm[i].elem<u64>(7) = random<u64>();
     }
 
     // Set opmask regs.
     for (u8 i(0); i < 8; ++i) {
-        expected.k[i] = 0xDEADBEEFCAFEBABE * i;
+        expected.k[i] = random<u64>();
     }
 
     // Set the registers on the VM.
