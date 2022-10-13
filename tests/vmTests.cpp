@@ -628,19 +628,14 @@ DECLARE_TEST(testSetRegisters) {
     expected.rflags ^= (1 << 9);
 
     // Set the MMX registers to some arbitrary values.
-    expected.mmx[0] = random<u64>();
-    expected.mmx[1] = random<u64>();
-    expected.mmx[2] = random<u64>();
-    expected.mmx[3] = random<u64>();
-    expected.mmx[4] = random<u64>();
-    expected.mmx[5] = random<u64>();
-    expected.mmx[6] = random<u64>();
-    expected.mmx[7] = random<u64>();
+    for (u8 i(0); i < X86Lab::Vm::State::Registers::NumMmxRegs; ++i) {
+        expected.mmx[i] = random<u64>();
+    }
 
     expected.mxcsr ^= (3 << 13);
 
     // XMM and YMM registers. Just some arbitrary patterns/values.
-    for (u8 i(0); i < 16; ++i) {
+    for (u8 i(0); i < X86Lab::Vm::State::Registers::NumYmmRegs; ++i) {
         expected.xmm[i] = vec128(random<u64>(), random<u64>());
         // FIXME: XMM and YMM are supposed to share some bits. However in the
         // Registers struct this is not the case, hence we need to make sure
@@ -660,8 +655,8 @@ DECLARE_TEST(testSetRegisters) {
         expected.zmm[i].elem<u64>(7) = random<u64>();
     }
 
-    // Set the top ZMM registers.
-    for (u8 i(16); i < 32; ++i) {
+    // Set the 16 top ZMM registers.
+    for (u8 i(16); i < X86Lab::Vm::State::Registers::NumZmmRegs; ++i) {
         expected.zmm[i].elem<u64>(0) = random<u64>();
         expected.zmm[i].elem<u64>(1) = random<u64>();
         expected.zmm[i].elem<u64>(2) = random<u64>();
@@ -673,7 +668,7 @@ DECLARE_TEST(testSetRegisters) {
     }
 
     // Set opmask regs.
-    for (u8 i(0); i < 8; ++i) {
+    for (u8 i(0); i < X86Lab::Vm::State::Registers::NumKRegs; ++i) {
         expected.k[i] = random<u64>();
     }
 
@@ -901,7 +896,7 @@ DECLARE_TEST(testReadMmxRegisters) {
         // YMM registers.
         u64 const v(0xDEADBEEFCAFEBABEULL);
         X86Lab::Vm::State::Registers const regs(vm->getRegisters());
-        for (u8 i(0); i < 8; ++i) {
+        for (u8 i(0); i < X86Lab::Vm::State::Registers::NumMmxRegs; ++i) {
             if (i == idx) {
                 TEST_ASSERT(regs.mmx[i] == v);
             } else {
@@ -1036,7 +1031,7 @@ DECLARE_TEST(testReadXmmRegisters) {
         u64 const high(0xDEADBEEFCAFEBABEULL);
         u64 const low(0xF00F1337CA7D0516ULL);
         X86Lab::Vm::State::Registers const regs(vm->getRegisters());
-        for (u8 i(0); i < 16; ++i) {
+        for (u8 i(0); i < X86Lab::Vm::State::Registers::NumXmmRegs; ++i) {
             if (i == idx) {
                 TEST_ASSERT(regs.xmm[i].elem<u64>(0) == low);
                 TEST_ASSERT(regs.xmm[i].elem<u64>(1) == high);
@@ -1161,7 +1156,7 @@ DECLARE_TEST(testReadYmmRegisters) {
         u64 const lh(0xABCDEF0123456789ULL);
         u64 const ll(0xF1E2D3C4B5A69788ULL);
         X86Lab::Vm::State::Registers const regs(vm->getRegisters());
-        for (u8 i(0); i < 16; ++i) {
+        for (u8 i(0); i < X86Lab::Vm::State::Registers::NumYmmRegs; ++i) {
             if (i == idx) {
                 TEST_ASSERT(regs.ymm[i].elem<u64>(0) == ll);
                 TEST_ASSERT(regs.ymm[i].elem<u64>(1) == lh);
@@ -1323,7 +1318,7 @@ DECLARE_TEST(testReadZmmRegisters) {
         exp.elem<u64>(1) = 0x1122334455667788ULL;
         exp.elem<u64>(0) = 0xA1B2C3D4E5F66F5EULL;
         X86Lab::Vm::State::Registers const regs(vm->getRegisters());
-        for (u8 i(0); i < 16; ++i) {
+        for (u8 i(0); i < X86Lab::Vm::State::Registers::NumZmmRegs; ++i) {
             if (i == idx) {
                 TEST_ASSERT(regs.zmm[i] == exp);
             } else {
@@ -1393,7 +1388,7 @@ DECLARE_TEST(testReadOpmaskRegisters) {
     // the check is passing, otherwise this is an assert failure.
     auto const checkRegs([&](u8 const idx) {
         X86Lab::Vm::State::Registers const regs(vm->getRegisters());
-        for (u8 i(0); i < 8; ++i) {
+        for (u8 i(0); i < X86Lab::Vm::State::Registers::NumKRegs; ++i) {
             if (i == idx) {
                 TEST_ASSERT(regs.k[i] == 0xDEAD);
             } else {

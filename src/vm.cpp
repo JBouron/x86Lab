@@ -27,22 +27,22 @@ Vm::State::Registers::Registers(kvm_regs const& regs,
     gdt({.base = sregs.gdt.base, .limit = sregs.gdt.limit}),
 
     mxcsr(xsave.mxcsr) {
-    for (u8 i(0); i < 16; ++i) {
+    for (u8 i(0); i < NumMmxRegs; ++i) {
         mmx[i] = xsave.mmx[i];
     }
 
-    for (u8 i(0); i < 16; ++i) {
+    for (u8 i(0); i < NumXmmRegs; ++i) {
         xmm[i] = vec128(xsave.ymm[i].elem<u64>(1), xsave.ymm[i].elem<u64>(0));
     }
 
-    for (u8 i(0); i < 16; ++i) {
+    for (u8 i(0); i < NumYmmRegs; ++i) {
         ymm[i] = xsave.ymm[i];
     }
 
-    for (u8 i(0); i < 32; ++i) {
+    for (u8 i(0); i < NumZmmRegs; ++i) {
         zmm[i] = xsave.zmm[i];
     }
-    for (u8 i(0); i < 8; ++i) {
+    for (u8 i(0); i < NumKRegs; ++i) {
         k[i] = xsave.k[i];
     }
 }
@@ -181,7 +181,7 @@ void Vm::setRegisters(State::Registers const& registerValues) {
 
     std::unique_ptr<Util::Kvm::XSaveArea> xsave(Util::Kvm::getXSave(m_vcpuFd));
     // Set the MMX registers.
-    for (u8 i(0); i < 16; ++i) {
+    for (u8 i(0); i < State::Registers::NumMmxRegs; ++i) {
         xsave->mmx[i] = registerValues.mmx[i];
     }
 
@@ -189,15 +189,15 @@ void Vm::setRegisters(State::Registers const& registerValues) {
     xsave->mxcsr = registerValues.mxcsr & xsave->mxcsrMask;
 
     // Set the XMM and YMM registers.
-    for (u8 i(0); i < 16; ++i) {
+    for (u8 i(0); i < State::Registers::NumYmmRegs; ++i) {
         xsave->ymm[i] = registerValues.ymm[i];
     }
 
     // ZMM registers.
-    for (u8 i(0); i < 32; ++i) {
+    for (u8 i(0); i < State::Registers::NumZmmRegs; ++i) {
         xsave->zmm[i] = registerValues.zmm[i];
     }
-    for (u8 i(0); i < 8; ++i) {
+    for (u8 i(0); i < State::Registers::NumKRegs; ++i) {
         xsave->k[i] = registerValues.k[i];
     }
 

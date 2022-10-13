@@ -51,14 +51,16 @@ public:
             Table idt;
             Table gdt;
 
+            static constexpr u8 NumMmxRegs = 8;
             // MMX registers.
-            vec64 mmx[8];
+            vec64 mmx[NumMmxRegs];
 
             // SSE's MXCSR register.
             u32 mxcsr;
 
+            static constexpr u8 NumXmmRegs = 16;
             // XMM registers.
-            vec128 xmm[16];
+            vec128 xmm[NumXmmRegs];
 
             // TODO: Include floating point registers.
 
@@ -66,12 +68,15 @@ public:
             // FIXME: YMM regs are aliased to their XMM reg for the bottom 128
             // bits. We could save a lot of space by deduplicating those bottom
             // bits in this struct.
-            vec256 ymm[16];
+            static constexpr u8 NumYmmRegs = 16;
+            vec256 ymm[NumYmmRegs];
 
             // FIXME: Deduplicate lower 256 bits of ZMM0-15 with YMM0-15.
-            vec512 zmm[32];
+            static constexpr u8 NumZmmRegs = 32;
+            vec512 zmm[NumZmmRegs];
             // Opmasks for AVX512.
-            u64 k[8];
+            static constexpr u8 NumKRegs = 8;
+            u64 k[NumKRegs];
 
             // Default constructor - all registers are set to 0.
             Registers();
