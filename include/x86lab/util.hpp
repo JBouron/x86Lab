@@ -328,14 +328,13 @@ struct XSaveArea {
     // SSE's MXCSR register and its mask.
     u32 mxcsr;
     u32 mxcsrMask;
-    // The YMM registers, also contains the XMM registers in their lower 128
-    // bits.
-    vec256 ymm[16];
-    // ZMM registers from AVX512 extension. FIXME: Deduplicate with YMM.
+    // ZMM registers. For i < 16, ZMMi's bottom 256 bits are aliased with YMMi
+    // and YMMi bottom 128 bits (and by extension ZMMi's bottom 128 bits) are
+    // aliased with XMMi. Therefore, to save space we only store ZMMi.
     vec512 zmm[32];
     // Opmasks used by AVX512.
     u64 k[8];
-} __attribute__((packed));
+};
 
 // Get the vcpu's XSAVE area. This calls the KVM_GET_XSAVE ioctl.
 // @param vcpuFd: The file descriptor of the target vcpu.

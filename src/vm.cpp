@@ -32,11 +32,14 @@ Vm::State::Registers::Registers(kvm_regs const& regs,
     }
 
     for (u8 i(0); i < NumXmmRegs; ++i) {
-        xmm[i] = vec128(xsave.ymm[i].elem<u64>(1), xsave.ymm[i].elem<u64>(0));
+        xmm[i] = vec128(xsave.zmm[i].elem<u64>(1), xsave.zmm[i].elem<u64>(0));
     }
 
     for (u8 i(0); i < NumYmmRegs; ++i) {
-        ymm[i] = xsave.ymm[i];
+        ymm[i] = vec256(xsave.zmm[i].elem<u64>(3),
+                        xsave.zmm[i].elem<u64>(2),
+                        xsave.zmm[i].elem<u64>(1),
+                        xsave.zmm[i].elem<u64>(0));
     }
 
     for (u8 i(0); i < NumZmmRegs; ++i) {
@@ -188,12 +191,7 @@ void Vm::setRegisters(State::Registers const& registerValues) {
     // MXCSR_MASK indicates the writable bits in MXCSR.
     xsave->mxcsr = registerValues.mxcsr & xsave->mxcsrMask;
 
-    // Set the XMM and YMM registers.
-    for (u8 i(0); i < State::Registers::NumYmmRegs; ++i) {
-        xsave->ymm[i] = registerValues.ymm[i];
-    }
-
-    // ZMM registers.
+    // ZMM registers. This also sets the YMM and XMM registers.
     for (u8 i(0); i < State::Registers::NumZmmRegs; ++i) {
         xsave->zmm[i] = registerValues.zmm[i];
     }

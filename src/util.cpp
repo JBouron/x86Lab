@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <x86lab/vm.hpp>
 
 namespace X86Lab::Util {
 
@@ -220,133 +221,148 @@ u16 getMaxMemSlots(int const vmFd) {
 }
 
 XSaveArea::XSaveArea() {
-    for (u8 i(0); i < 8; ++i) {
+    for (u8 i(0); i < Vm::State::Registers::NumMmxRegs; ++i) {
         mmx[i] = vec64(u32(0), u32(0));
     }
     mxcsr = 0;
     mxcsrMask = 0;
-    for (u8 i(0); i < 16; ++i) {
-        ymm[i] = vec256(u64(0), u64(0), u64(0), u64(0));
-    }
-    for (u8 i(0); i < 32; ++i) {
+    for (u8 i(0); i < Vm::State::Registers::NumZmmRegs; ++i) {
         zmm[i] = vec512(u64(0), u64(0), u64(0), u64(0),
                         u64(0), u64(0), u64(0), u64(0));
     }
-    for (u8 i(0); i < 8; ++i) {
+    for (u8 i(0); i < Vm::State::Registers::NumKRegs; ++i) {
         k[i] = 0;
     }
 }
 
 XSaveArea::XSaveArea(kvm_xsave const& xsave) {
+    // Intel's reference vol. 1, chapter 13-6, describes the offset of the state
+    // of the FPU and other vector registers in the XSAVE area.
     u8 const * const state(reinterpret_cast<u8 const*>(xsave.region));
 
-    // Per Intel's reference vol. 1, chapter 13-6, the offset of the state of
-    // the FPU are:
-    //  - MMX registers: MMi is @ 32 + 16 * i.
-    //  - XMM registers (also low half of YMM register): XMMi is @ 160 + 16 * i.
-    //  - High half of YMM register: $(cpuid(eax = 0xD, ecx = 2).ebx) + 16 * i.
-
-    for (u8 i(0); i < 8; ++i) {
-        u8 const * const mmxRegData(state + 32 + 16 * i);
-        mmx[i] = vec64(mmxRegData);
+    // MMX registers: MMi is at offset 32 + 16 * i.
+    u32 const mmxBase(32);
+    for (u8 i(0); i < Vm::State::Registers::NumMmxRegs; ++i) {
+        u32 const mmxiOff(mmxBase + i * 16);
+        mmx[i] = *reinterpret_cast<vec64 const*>(state + mmxiOff);
     }
 
-    u32 const ymmHighHalfOffset(Extension::cpuid(0xD, 0x2).ebx);
-    for (u8 i(0); i < 16; ++i) {
-        // The two QWORDs making the lower half of YMMi.
-        u8 const * const xmmRegData(state + 160 + 16 * i);
-        u64 const xmmL(*reinterpret_cast<u64 const*>(xmmRegData));
-        u64 const xmmH(*reinterpret_cast<u64 const*>(xmmRegData + 8));
+    // For i < 16, XMMi, YMMi and ZMMi are sharing their bottom 128 bits. For
+    // this reason, XSAVE does not duplicate this state and instead stores the
+    // following info at different offsets:
+    //  - The full XMMi             @ 160 + i * 16.
+    //  - The top 128 bits of YMMi  @ $(cpuid(eax = 0xD, ecx = 2).ebx) + i * 16.
+    //  - The top 256 bits of ZMMi  @ $(cpuid(eax = 0xD, ecx = 6).ebx) + i * 32.
+    // We therefore need to parse all three to reconstruct the full state of
+    // ZMMi.
+    u32 const xmmBase(160);
+    u32 const ymmHighHalfBase(Extension::cpuid(0xD, 0x2).ebx);
+    u32 const zmmHighHalfBase(Extension::cpuid(0xD, 0x6).ebx);
+    for (u8 i(0); i < Vm::State::Registers::NumXmmRegs; ++i) {
+        // XMMi
+        u32 const xmmiOff(xmmBase + i * 16);
+        vec128 const xmmi(*reinterpret_cast<vec128 const*>(state + xmmiOff));
 
-        // The two QWORDs making the highe half of YMMi.
-        u8 const * const ymmHighHalfData(state + ymmHighHalfOffset + 16 * i);
-        u64 const ymmHL(*reinterpret_cast<u64 const*>(ymmHighHalfData));
-        u64 const ymmHH(*reinterpret_cast<u64 const*>(ymmHighHalfData + 8));
+        // YMMi
+        u32 const ymmiHiOff(ymmHighHalfBase + i * 16);
+        vec128 const ymmiHi(
+            *reinterpret_cast<vec128 const*>(state + ymmiHiOff));
 
-        ymm[i] = vec256(ymmHH, ymmHL, xmmH, xmmL);
+        // ZMMi
+        u32 const zmmiHiOff(zmmHighHalfBase + i * 32);
+        vec256 const zmmiHi(
+            *reinterpret_cast<vec256 const*>(state + zmmiHiOff));
+        zmm[i] = vec512(zmmiHi.elem<u64>(3),
+                        zmmiHi.elem<u64>(2),
+                        zmmiHi.elem<u64>(1),
+                        zmmiHi.elem<u64>(0),
+                        ymmiHi.elem<u64>(1),
+                        ymmiHi.elem<u64>(0),
+                        xmmi.elem<u64>(1),
+                        xmmi.elem<u64>(0));
     }
 
+    // MXCSR and its mask are stored at offset 24.
     mxcsr = *reinterpret_cast<u32 const*>(state + 24);
     mxcsrMask = *reinterpret_cast<u32 const*>(state + 28);
 
     // AVX512:
-    //  - OPmasks: ki is @ $(cpuid(eax = 0xD, ecx = 5).ebx) + 8 * i
-    //  - ZMM_Hi256 is @ $(cpuid(eax = 0xD, ecx = 6).ebx) + 32 * i for the first
-    //  16 zmm registers since their low 256 bits are aliased with ymm
-    //  registers.
-    //  - ZMM 16 - 31 are @ $(cpuid(eax = 0xD, ecx = 7).ebx) + 64 * i.
-    // Opmasks
-    u32 const opMaskOffset(Extension::cpuid(0xD, 0x5).ebx);
-    for (u8 i(0); i < 8; ++i) {
-        k[i] = *(reinterpret_cast<u64 const*>(state + opMaskOffset + 8 * i));
+    // For i >= 16, ZMMi is fully stored at offset:
+    //  $(cpuid(eax = 0xD, ecx = 7).ebx) + i * 64.
+    // ZMMi for i < 16 we parsed above along with YMMi and XMMi.
+    u64 const highZmmBase(Extension::cpuid(0xD, 0x7).ebx);
+    for (u8 i(0); i < Vm::State::Registers::NumZmmRegs / 2; ++i) {
+        u32 const zmmiOff(highZmmBase + i * 64);
+        zmm[i + 16] = *(reinterpret_cast<vec512 const*>(state + zmmiOff));
     }
-
-    // ZMM_Hi256.
-    u32 const zmmHighHalfOffset(Extension::cpuid(0xD, 0x6).ebx);
-    for (u8 i(0); i < 16; ++i) {
-        vec256 const high(*(reinterpret_cast<vec256 const*>(state + zmmHighHalfOffset + 32 * i)));
-        vec256 const low(ymm[i]);
-        for (u8 j(0); j < 4; ++j) {
-            zmm[i].elem<u64>(j) = low.elem<u64>(j);
-            zmm[i].elem<u64>(j + 4) = high.elem<u64>(j);
-        }
-    }
-
-    // Hi16_ZMM
-    u64 const highZmmOffset(Extension::cpuid(0xD, 0x7).ebx);
-    for (u8 i(0); i < 16; ++i) {
-        zmm[16 + i] = *(reinterpret_cast<vec512 const*>(state + highZmmOffset + 64 * i));
+    // OPmask ki is @ $(cpuid(eax = 0xD, ecx = 5).ebx) + i * 8.
+    u32 const opMaskBase(Extension::cpuid(0xD, 0x5).ebx);
+    for (u8 i(0); i < Vm::State::Registers::NumKRegs; ++i) {
+        u32 const kiOff(opMaskBase + i * 8);
+        k[i] = *(reinterpret_cast<u64 const*>(state + kiOff));
     }
 }
 
 void XSaveArea::fillKvmXSave(kvm_xsave * const xsave) const {
+    // Intel's reference vol. 1, chapter 13-6, describes the offset of the state
+    // of the FPU and other vector registers in the XSAVE area.
     u8 * const state(reinterpret_cast<u8*>(xsave->region));
 
-    for (u8 i(0); i < 8; ++i) {
-        u64 * const mmxRegData(reinterpret_cast<u64*>(state + 32 + 16 * i));
-        *mmxRegData = mmx[i].elem<u64>(0);
+    // MMX registers: MMi is at offset 32 + 16 * i.
+    u32 const mmxBase(32);
+    for (u8 i(0); i < Vm::State::Registers::NumMmxRegs; ++i) {
+        u32 const mmxiOff(mmxBase + i * 16);
+        *reinterpret_cast<vec64*>(state + mmxiOff) = mmx[i];
     }
 
-    u32 const ymmHighOffset(Extension::cpuid(0xD, 0x2).ebx);
-    for (u8 i(0); i < 16; ++i) {
-        u64 * const xmmRegData(reinterpret_cast<u64*>(state + 160 + 16 * i));
-        u64 * const ymmHighData(
-            reinterpret_cast<u64*>(state + ymmHighOffset + 16 * i));
+    // For i < 16, XMMi, YMMi and ZMMi are sharing their bottom 128 bits. For
+    // this reason, XSAVE does not duplicate this state and instead stores the
+    // following info at different offsets:
+    //  - The full XMMi             @ 160 + i * 16.
+    //  - The top 128 bits of YMMi  @ $(cpuid(eax = 0xD, ecx = 2).ebx) + i * 16.
+    //  - The top 256 bits of ZMMi  @ $(cpuid(eax = 0xD, ecx = 6).ebx) + i * 32.
+    // We therefore need to store all three separately.
+    u32 const xmmBase(160);
+    u32 const ymmHighHalfBase(Extension::cpuid(0xD, 0x2).ebx);
+    u32 const zmmHighHalfBase(Extension::cpuid(0xD, 0x6).ebx);
+    for (u8 i(0); i < Vm::State::Registers::NumXmmRegs; ++i) {
+        // XMMi
+        u32 const xmmiOff(xmmBase + i * 16);
+        vec128 const xmmi(zmm[i].elem<u64>(1), zmm[i].elem<u64>(0));
+        *reinterpret_cast<vec128*>(state + xmmiOff) = xmmi;
 
-        xmmRegData[0] = ymm[i].elem<u64>(0);
-        xmmRegData[1] = ymm[i].elem<u64>(1);
-        ymmHighData[0] = ymm[i].elem<u64>(2);
-        ymmHighData[1] = ymm[i].elem<u64>(3);
+        // YMMi high bits
+        u32 const ymmiHiOff(ymmHighHalfBase + i * 16);
+        vec128 const ymmiHi(zmm[i].elem<u64>(3), zmm[i].elem<u64>(2));
+        *reinterpret_cast<vec128*>(state + ymmiHiOff) = ymmiHi;
+
+        // ZMMi high bits
+        u32 const zmmiHiOff(zmmHighHalfBase + i * 32);
+        vec256 const zmmiHi(zmm[i].elem<u64>(7),
+                            zmm[i].elem<u64>(6),
+                            zmm[i].elem<u64>(5),
+                            zmm[i].elem<u64>(4));
+        *reinterpret_cast<vec256*>(state + zmmiHiOff) = zmmiHi;
     }
 
+    // MXCSR and its mask are stored at offset 24.
     *reinterpret_cast<u32*>(state + 24) = mxcsr;
     *reinterpret_cast<u32*>(state + 28) = mxcsrMask;
 
     // AVX512:
-    //  - OPmasks: ki is @ $(cpuid(eax = 0xD, ecx = 5).ebx) + 8 * i
-    //  - ZMM_Hi256 is @ $(cpuid(eax = 0xD, ecx = 6).ebx) + 32 * i for the first
-    //  16 zmm registers since their low 256 bits are aliased with ymm
-    //  registers.
-    //  - ZMM 16 - 31 are @ $(cpuid(eax = 0xD, ecx = 7).ebx) + 64 * i.
-    u32 const opMaskOffset(Extension::cpuid(0xD, 0x5).ebx);
-    for (u8 i(0); i < 8; ++i) {
-        *(reinterpret_cast<u64*>(state + opMaskOffset + 8 * i)) = k[i];
+    // For i >= 16, ZMMi is fully stored at offset:
+    //  $(cpuid(eax = 0xD, ecx = 7).ebx) + i * 64.
+    // ZMMi for i < 16 were stored above along with YMMi and XMMi.
+    u64 const highZmmBase(Extension::cpuid(0xD, 0x7).ebx);
+    for (u8 i(0); i < Vm::State::Registers::NumZmmRegs / 2; ++i) {
+        u32 const zmmiOff(highZmmBase + i * 64);
+        *reinterpret_cast<vec512*>(state + zmmiOff) = zmm[i + 16];
     }
-
-    // ZMM_Hi256.
-    u32 const zmmHighHalfOffset(Extension::cpuid(0xD, 0x6).ebx);
-    for (u8 i(0); i < 16; ++i) {
-        vec256 high;
-        for (u8 j(0); j < 4; ++j) {
-            high.elem<u64>(j) = zmm[i].elem<u64>(j + 4);
-        }
-        *(reinterpret_cast<vec256*>(state + zmmHighHalfOffset + 32 * i)) = high;
-    }
-
-    // Hi16_ZMM
-    u64 const highZmmOffset(Extension::cpuid(0xD, 0x7).ebx);
-    for (u8 i(0); i < 16; ++i) {
-        *(reinterpret_cast<vec512*>(state + highZmmOffset + 64 * i)) = zmm[16 + i];
+    // OPmask ki is @ $(cpuid(eax = 0xD, ecx = 5).ebx) + i * 8.
+    u32 const opMaskBase(Extension::cpuid(0xD, 0x5).ebx);
+    for (u8 i(0); i < Vm::State::Registers::NumKRegs; ++i) {
+        u32 const kiOff(opMaskBase + i * 8);
+        *reinterpret_cast<u64*>(state + kiOff) = k[i];
     }
 }
 
