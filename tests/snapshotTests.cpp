@@ -44,14 +44,32 @@ static std::unique_ptr<X86Lab::Vm::State> genRandomState(u64 const memSize) {
     regs.efer = generator();
     regs.idt = { .base = generator(), .limit = static_cast<u16>(generator()) };
     regs.gdt = { .base = generator(), .limit = static_cast<u16>(generator()) };
-    regs.mmx[0] = generator();
-    regs.mmx[1] = generator();
-    regs.mmx[2] = generator();
-    regs.mmx[3] = generator();
-    regs.mmx[4] = generator();
-    regs.mmx[5] = generator();
-    regs.mmx[6] = generator();
-    regs.mmx[7] = generator();
+
+    for (u8 i(0); i < Vm::State::Registers::NumMmxRegs; ++i) {
+        regs.mmx[i] = generator();
+    }
+    for (u8 i(0); i < Vm::State::Registers::NumXmmRegs; ++i) {
+        regs.xmm[i] = vec128(generator(), generator());
+    }
+    for (u8 i(0); i < Vm::State::Registers::NumYmmRegs; ++i) {
+        regs.ymm[i] = vec256(generator(),
+                             generator(),
+                             generator(),
+                             generator());
+    }
+    for (u8 i(0); i < Vm::State::Registers::NumZmmRegs; ++i) {
+        // FIXME: We do not honor the relationship between ZMMi, YMMi and
+        // XMMi for i < 16 (e.g. aliased lower bits). However it does not matter
+        // much for these tests.
+        regs.zmm[i] = vec512(generator(),
+                             generator(),
+                             generator(),
+                             generator(),
+                             generator(),
+                             generator(),
+                             generator(),
+                             generator());
+    }
 
     TEST_ASSERT(!(memSize % 8));
 
