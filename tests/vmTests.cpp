@@ -917,7 +917,7 @@ DECLARE_TEST(testReadMmxRegisters) {
     // Run the prelogue.
     runVm(2);
 
-    for (u8 i(0); i < 8; ++i) {
+    for (u8 i(0); i < X86Lab::Vm::State::Registers::NumMmxRegs; ++i) {
         runVm(1);
         checkRegs(i);
         runVm(1);
@@ -1055,7 +1055,7 @@ DECLARE_TEST(testReadXmmRegisters) {
     // Run the prelogue.
     runVm(8);
 
-    for (u8 i(0); i < 16; ++i) {
+    for (u8 i(0); i < X86Lab::Vm::State::Registers::NumXmmRegs; ++i) {
         checkRegs(i);
         // The register will be overwritten with 0 on the next instruction.
         if (i < 15) {
@@ -1171,7 +1171,7 @@ DECLARE_TEST(testReadYmmRegisters) {
     // Run prologue.
     runVm(13);
 
-    for (u8 i(0); i < 16; ++i) {
+    for (u8 i(0); i < X86Lab::Vm::State::Registers::NumYmmRegs; ++i) {
         // Run the first vmovdqu setting the reg to the special value.
         runVm(1);
         checkRegs(i);
@@ -1330,7 +1330,7 @@ DECLARE_TEST(testReadZmmRegisters) {
     // Run prologue.
     runVm(25);
 
-    for (u8 i(0); i < 32; ++i) {
+    for (u8 i(0); i < X86Lab::Vm::State::Registers::NumZmmRegs; ++i) {
         // Run the first vmovdqu64 setting the reg to the special value.
         runVm(1);
         checkRegs(i);
@@ -1400,7 +1400,7 @@ DECLARE_TEST(testReadOpmaskRegisters) {
     // Run prologue.
     runVm(2);
 
-    for (u8 i(0); i < 8; ++i) {
+    for (u8 i(0); i < X86Lab::Vm::State::Registers::NumKRegs; ++i) {
         // Set the opmask register.
         runVm(1);
         checkRegs(i);
