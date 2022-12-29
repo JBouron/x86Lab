@@ -4,6 +4,7 @@
 #include <x86lab/assembler.hpp>
 #include <x86lab/ui/cli.hpp>
 #include <x86lab/ui/tui.hpp>
+#include <x86lab/ui/imgui.hpp>
 #include <x86lab/runner.hpp>
 
 using namespace X86Lab;
@@ -24,7 +25,7 @@ static void help() {
 
 static void run(Vm::CpuMode const vmStartMode, std::string const& fileName) {
     // Run code in `fileName` starting directly in 64 bits mode.
-    std::shared_ptr<Ui::Backend> ui(new Ui::Tui());
+    std::shared_ptr<Ui::Backend> ui(new Ui::Imgui());
 
     // Assemble the code.
     ui->log("Assembling code in " + fileName);

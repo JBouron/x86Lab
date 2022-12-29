@@ -25,15 +25,24 @@ u64 State::currentLine() const {
 }
 
 u64 State::mapToLine(u64 const address) const {
-    return m_loadedCode->offsetToLine(address);
+    if (!!m_loadedCode) {
+        return m_loadedCode->offsetToLine(address);
+    } else {
+        return 0;
+    }
 }
 
 Snapshot::Registers const& State::registers() const {
-    return m_latestSnapshot->registers();
+    if (!!m_latestSnapshot) {
+        return m_latestSnapshot->registers();
+    } else {
+        static Snapshot::Registers defaultRegs;
+        return defaultRegs;
+    }
 }
 
 Snapshot::Registers State::prevRegisters() const {
-    if (m_latestSnapshot->hasBase()) {
+    if (!!m_latestSnapshot && m_latestSnapshot->hasBase()) {
         return m_latestSnapshot->base()->registers();
     } else {
         return Snapshot::Registers();

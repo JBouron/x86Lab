@@ -30,6 +30,9 @@ enum class Action {
 // implementation through the Backend::update() function (see below).
 class State {
 public:
+    // Default, empty state.
+    State() = default;
+
     // Construct a State.
     // @param runState: The VM's runnable state.
     // @param code: The code that is currently loaded and running on the Vm.
@@ -65,7 +68,7 @@ public:
 private:
     Vm::OperatingState m_runState;
     std::shared_ptr<Code const> m_loadedCode;
-    std::shared_ptr<Snapshot const> const m_latestSnapshot;
+    std::shared_ptr<Snapshot const> m_latestSnapshot;
 };
 
 // Backend implementation of the user interface. This is meant to be derived in
