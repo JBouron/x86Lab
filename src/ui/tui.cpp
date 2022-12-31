@@ -54,6 +54,11 @@ Tui::~Tui() {
     ::endwin();
 }
 
+bool Tui::doInit() {
+    // All initialization is done in the constructor.
+    return true;
+}
+
 Action Tui::doWaitForNextAction() {
     int nextChar(regWin->getChar());
     while (true) {

@@ -18,6 +18,10 @@ Runner::Runner(std::shared_ptr<Vm> const vm,
 }
 
 void Runner::run() {
+    // Initilize UI.
+    if (!m_ui->init()) {
+        throw X86Lab::Error("Cannot initialize UI", 0);
+    }
     // Show the initial condition of the VM.
     updateUi();
     m_ui->log("Ready to run");

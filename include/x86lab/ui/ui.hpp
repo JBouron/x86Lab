@@ -78,6 +78,10 @@ public:
     // Virtual destructor to ensure calling derived destructors.
     virtual ~Backend() = 0;
 
+    // Initialize the backend.
+    // @return: true if the initialization was successful, false otherwise.
+    bool init();
+
     // Wait for the next action from the user.
     // @return: The action selected by the user.
     Action waitForNextAction();
@@ -91,6 +95,9 @@ public:
     void log(std::string const& msg);
 
 private:
+    // Implementation of init, to be defined by sub-class.
+    virtual bool doInit() = 0;
+
     // Implementation of waitForNextAction, to be defined by sub-class.
     virtual Action doWaitForNextAction() = 0;
 

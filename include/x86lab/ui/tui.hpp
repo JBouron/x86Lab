@@ -15,6 +15,9 @@ public:
     // Free up resources tied to this backend.
     ~Tui();
 private:
+    // Implementation of init.
+    virtual bool doInit();
+
     // Implementation of waitForNextAction.
     virtual Action doWaitForNextAction();
 

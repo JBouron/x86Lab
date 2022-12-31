@@ -51,6 +51,10 @@ Snapshot::Registers State::prevRegisters() const {
 
 Backend::~Backend() {}
 
+bool Backend::init() {
+    return doInit();
+}
+
 Action Backend::waitForNextAction() {
     return doWaitForNextAction();
 }
