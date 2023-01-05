@@ -615,9 +615,14 @@ DECLARE_TEST(testSetRegisters) {
     expected.cr8 ^= 0xF;
     expected.efer ^= (1 << 11);
 
-    expected.gdt.base = random<u64>();
+    // It seems that on Intel hosts, the GDT and IDT bases must be in
+    // canonical form, otherwise the VM entry will fail giving an "invalid VMCS"
+    // as reason. This does not happen on AMD hosts.
+    // Note: This is rather strange given that GDT and IDT bases are not part of
+    // the checks on guest state area.
+    expected.gdt.base = 0xFFFFFFF8CAFEBABE;
     expected.gdt.limit = random<u16>();
-    expected.idt.base = random<u64>();
+    expected.idt.base = 0xFFFFFFF8DEADBEEF;
     expected.idt.limit = random<u16>();
 
     // Set RIP to point to the nop instruction which is 8 bytes from the current
