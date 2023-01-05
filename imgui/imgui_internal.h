@@ -2421,7 +2421,12 @@ struct IMGUI_API ImGuiTabBar
 //-----------------------------------------------------------------------------
 
 #define IM_COL32_DISABLE                IM_COL32(0,0,0,1)   // Special sentinel code which cannot be used as a regular color.
-#define IMGUI_TABLE_MAX_COLUMNS         64                  // sizeof(ImU64) * 8. This is solely because we frequently encode columns set in a ImU64.
+
+// Note [JBouron/x86Lab]: When printing out the table for avx-512 registers with
+// a byte granularity, we need 65 columns. I've bump the limit below from 64 to
+// 65 and it seems to be working fine so far. This could be due to the fact that
+// x86Lab uses very basic table features (e.g. no sorting or re-ordering).
+#define IMGUI_TABLE_MAX_COLUMNS         65                  // sizeof(ImU64) * 8. This is solely because we frequently encode columns set in a ImU64.
 #define IMGUI_TABLE_MAX_DRAW_CHANNELS   (4 + 64 * 2)        // See TableSetupDrawChannels()
 
 // Our current column maximum is 64 but we may raise that in the future.

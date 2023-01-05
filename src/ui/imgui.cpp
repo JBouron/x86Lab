@@ -4,6 +4,16 @@
 #include <iomanip>
 
 namespace X86Lab::Ui {
+std::map<Imgui::VectorRegisterGranularity, u32> const Imgui::granularityToBytes
+    = {
+    {Imgui::VectorRegisterGranularity::Byte,   1},
+    {Imgui::VectorRegisterGranularity::Word,   2},
+    {Imgui::VectorRegisterGranularity::Dword,  4},
+    {Imgui::VectorRegisterGranularity::Qword,  8},
+    {Imgui::VectorRegisterGranularity::Float,  4},
+    {Imgui::VectorRegisterGranularity::Double, 8},
+};
+
 // SDL window and renderer left to nullptr until doInit() is called on this
 // backend.
 Imgui::Imgui() : m_sdlWindow(nullptr),
@@ -105,62 +115,6 @@ void Imgui::doUpdate(State const& newState) {
 
 void Imgui::doLog(std::string const& msg) {
     m_logs.push_back(msg);
-}
-
-template<size_t W, typename T>
-static std::string vecToStr(vec<W> const& vec, std::string const& separator) {
-    u32 const elemWidth(sizeof(T) * 8);
-    assert(!(W % elemWidth));
-    u32 const numElems(W / elemWidth);
-
-    std::ostringstream oss;
-    if constexpr (!std::is_same_v<T, float> && !std::is_same_v<T, double>) {
-        oss << std::hex;
-    }
-    for (int i(numElems - 1); i >=0; --i) {
-        if constexpr (!std::is_same_v<T, float> && !std::is_same_v<T, double>) {
-            oss << std::setfill('0');
-            oss << std::setw(elemWidth / 4);
-            // Need the cast to u64 in the case of packed bytes representation
-            // to avoid printing characters.
-            oss << (u64)vec.template elem<T>(i);
-        } else {
-            // In float or double, use the max precision possible.
-            static_assert(std::is_same_v<T, float>||std::is_same_v<T, double>);
-            int const digits(std::numeric_limits<T>::digits10);
-            oss.precision(digits);
-            oss << vec.template elem<T>(i);
-        }
-        if (!!i) {
-            oss << separator;
-        }
-    }
-    return oss.str();
-}
-
-template<size_t W>
-std::string Imgui::vecRegToString(vec<W> const& vec,
-                                  VectorRegisterGranularity const granularity) {
-    switch (granularity) {
-        case VectorRegisterGranularity::Byte:
-            return vecToStr<W, u8>(vec, " ");
-        case VectorRegisterGranularity::Word:
-            return vecToStr<W, u16>(vec, " ");
-        case VectorRegisterGranularity::Dword:
-            return vecToStr<W, u32>(vec, " ");
-        case VectorRegisterGranularity::Qword:
-            return vecToStr<W, u64>(vec, " ");
-        case VectorRegisterGranularity::Float:
-            return vecToStr<W, float>(vec, " ");
-        case VectorRegisterGranularity::Double:
-            return vecToStr<W, double>(vec, " ");
-        case VectorRegisterGranularity::Full:
-            // Re-use packed bytes representation with no space in between
-            // elements.
-            return vecToStr<W, u8>(vec, "");
-        default:
-            throw Error("Invalid VectorRegisterGranularity", 0);
-    }
 }
 
 void Imgui::draw() {
@@ -421,50 +375,135 @@ void Imgui::drawRegsWin(ImGuiViewport const& viewport) {
         ImGui::EndTabItem();
     }
 
+    // Vector registers.
+    // Vector registers are printed out in tables, the following flags control
+    // the drawing of those tables.
+    ImGuiTableFlags const vecRegTableFlags(ImGuiTableFlags_ScrollX |
+                                           ImGuiTableFlags_BordersV);
+    ImGuiTableColumnFlags const vecRegColFlags(
+        ImGuiTableColumnFlags_WidthFixed);
+
     // FPU / MMX.
     if (ImGui::BeginTabItem("FPU & MMX", NULL, 0)) {
-        VectorRegisterGranularity granularity;
-        if (m_currentGranularity == VectorRegisterGranularity::Float ||
-            m_currentGranularity == VectorRegisterGranularity::Double ||
-            m_currentGranularity == VectorRegisterGranularity::Full) {
-            // MMX registers only hold packed integers. Full is equivalent to
-            // Qword hence use Qword granularity in those cases.
-            granularity = VectorRegisterGranularity::Qword;
-        } else {
-            granularity = m_currentGranularity;
+        // MMX registers only hold packed integers, hence override the current
+        // granularity if it is set to float or double.
+        VectorRegisterGranularity const granularity(
+            (m_currentGranularity == VectorRegisterGranularity::Float ||
+             m_currentGranularity == VectorRegisterGranularity::Double) ?
+                VectorRegisterGranularity::Qword :
+                m_currentGranularity);
+
+        u32 const numElemForGran(vec64::bytes /
+            granularityToBytes.at(granularity));
+        // One column for the register name, one for each element in the current
+        // granularity.
+        u32 const numCols(1 + numElemForGran);
+
+        if (ImGui::BeginTable("MMX", numCols, vecRegTableFlags)) {
+            // Name column.
+            ImGui::TableSetupColumn("Reg.", vecRegColFlags);
+            // Element column, named after the index of each element in the
+            // vector.
+            for (u32 i(0); i < numCols - 1; ++i) {
+                ImGui::TableSetupColumn(std::to_string((numCols-2) - i).c_str(),
+                                        vecRegColFlags);
+            }
+            ImGui::TableHeadersRow();
+
+            for (u8 i(0); i < X86Lab::Vm::State::Registers::NumMmxRegs; ++i) {
+                ImGui::TableNextColumn();
+                ImGui::Text("%s", ("mmx" + std::to_string(i)).c_str());
+                drawColsForVec(m_state.registers().mmx[i], granularity);
+                ImGui::TableNextColumn();
+                ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
+                drawColsForVec(m_state.prevRegisters().mmx[i], granularity);
+                ImGui::PopStyleColor();
+            }
+            ImGui::EndTable();
         }
 
-        for (u8 i(0); i < X86Lab::Vm::State::Registers::NumMmxRegs; ++i) {
-            std::string line("mmx" + std::to_string(i) + " = ");
-            line += vecRegToString(m_state.registers().mmx[i], granularity);
-            ImGui::Text("%s", line.c_str());
-            line = "       " + vecRegToString(m_state.prevRegisters().mmx[i],
-                                              granularity);
-            ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-            ImGui::Text("%s", line.c_str());
-            ImGui::PopStyleColor();
-        }
         ImGui::EndTabItem();
     }
 
     // SSE / AVX.
     if (ImGui::BeginTabItem("SSE & AVX", NULL, 0)) {
-        for (u8 i(0); i < X86Lab::Vm::State::Registers::NumYmmRegs; ++i) {
-            std::string const pad(i < 10 ? " " : "");
-            std::string line("ymm" + std::to_string(i) + pad + " = ");
-            line += vecRegToString(m_state.registers().ymm[i],
-                                   m_currentGranularity);
-            ImGui::Text("%s", line.c_str());
-            line = "        " + vecRegToString(m_state.prevRegisters().ymm[i],
-                                               m_currentGranularity);
-            ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-            ImGui::Text("%s", line.c_str());
-            ImGui::PopStyleColor();
+        // If AVX-512 is available, print the zmm registers, otherwise only
+        // print ymms registers.
+        u32 const bytePerVec(Util::Extension::hasAvx512() ?
+                             vec512::bytes : vec256::bytes);
+        VectorRegisterGranularity const granularity(m_currentGranularity);
+        u32 const numElemForGran(bytePerVec /
+            granularityToBytes.at(granularity));
+        u32 const numCols(1 + numElemForGran);
+
+        if (ImGui::BeginTable("SSE/AVX", numCols, vecRegTableFlags)) {
+            // Set up column names: regs 8 7 6 ... 0
+            ImGui::TableSetupColumn("Reg.", vecRegColFlags);
+            for (u32 i(0); i < numCols - 1; ++i) {
+                ImGui::TableSetupColumn(std::to_string((numCols-2) - i).c_str(),
+                                        vecRegColFlags);
+            }
+            ImGui::TableHeadersRow();
+
+            u32 const numRegs(Util::Extension::hasAvx512() ?
+                              X86Lab::Vm::State::Registers::NumZmmRegs :
+                              X86Lab::Vm::State::Registers::NumYmmRegs);
+            char const * const name(Util::Extension::hasAvx512()?"zmm":"ymm");
+            for (u8 i(0); i < numRegs; ++i) {
+                // Register name.
+                ImGui::TableNextColumn();
+                ImGui::Text("%s", (name + std::to_string(i)).c_str());
+                if (Util::Extension::hasAvx512()) {
+                    drawColsForVec(m_state.registers().zmm[i], granularity);
+                } else {
+                    drawColsForVec(m_state.registers().ymm[i], granularity);
+                }
+                ImGui::TableNextColumn();
+                ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
+                if (Util::Extension::hasAvx512()) {
+                    drawColsForVec(m_state.prevRegisters().zmm[i], granularity);
+                } else {
+                    drawColsForVec(m_state.prevRegisters().ymm[i], granularity);
+                }
+                ImGui::PopStyleColor();
+            }
+            ImGui::EndTable();
         }
         ImGui::EndTabItem();
     }
     ImGui::EndTabBar();
     ImGui::End();
+}
+
+template<size_t W>
+void Imgui::drawColsForVec(vec<W> const& vec,
+                           VectorRegisterGranularity const granularity) {
+    u32 const numElems(vec.bytes / granularityToBytes.at(granularity));
+    for (int i(numElems - 1); i >= 0; --i) {
+        ImGui::TableNextColumn();
+        switch (granularity) {
+            case VectorRegisterGranularity::Byte:
+                ImGui::Text("%02hhx", vec.template elem<u8>(i));
+                break;
+            case VectorRegisterGranularity::Word:
+                ImGui::Text("%04hx", vec.template elem<u16>(i));
+                break;
+            case VectorRegisterGranularity::Dword:
+                ImGui::Text("%08x", vec.template elem<u32>(i));
+                break;
+            case VectorRegisterGranularity::Qword:
+                ImGui::Text("%016lx", vec.template elem<u64>(i));
+                break;
+            case VectorRegisterGranularity::Float:
+                ImGui::Text("%f", vec.template elem<float>(i));
+                break;
+            case VectorRegisterGranularity::Double:
+                ImGui::Text("%f", vec.template elem<double>(i));
+                break;
+            default:
+                throw std::runtime_error("Invalid granularity");
+        }
+    }
 }
 
 void Imgui::drawLogsWin(ImGuiViewport const& viewport) {

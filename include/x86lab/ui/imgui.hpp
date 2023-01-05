@@ -94,9 +94,6 @@ private:
         // Packed floating point values.
         Float,
         Double,
-        // Value of the entire vector register interpreted as one big unsigned
-        // integer.
-        Full,
 
         // Must be last.
         __MAX,
@@ -104,13 +101,18 @@ private:
     // The granularity in which the vector registers are currently displayed.
     VectorRegisterGranularity m_currentGranularity;
 
-    // Convert a vector register value to its string representation in a given
+    // How many bytes is a single element in the given granularity. Used to
+    // compute how many elements a vector register contains in a given
     // granularity.
-    // @param vec: The vector register value to convert.
-    // @param gran: The granularity to use in the string representation.
+    static std::map<VectorRegisterGranularity, u32> const granularityToBytes;
+
+    // Draw the columns for each element of a vector register in the given
+    // granularity. This function assumes that we are currently drawing a table
+    // (e.g. between BeginTable and EndTable calls) and calls TableNextColumn
+    // before printing out each element of the vector register.
     template<size_t W>
-    static std::string vecRegToString(vec<W> const& vec,
-                                      VectorRegisterGranularity const gran);
+    void drawColsForVec(vec<W> const& vec,
+                        VectorRegisterGranularity const granularity);
 
     // Last known, state of the VM, this is what is currently being displayed in
     // the GUI.
