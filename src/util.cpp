@@ -257,7 +257,6 @@ XSaveArea::XSaveArea(kvm_xsave const& xsave) {
     // ZMMi.
     u32 const xmmBase(160);
     u32 const ymmHighHalfBase(Extension::cpuid(0xD, 0x2).ebx);
-    u32 const zmmHighHalfBase(Extension::cpuid(0xD, 0x6).ebx);
     for (u8 i(0); i < Vm::State::Registers::NumXmmRegs; ++i) {
         // XMMi
         u32 const xmmiOff(xmmBase + i * 16);
@@ -269,9 +268,14 @@ XSaveArea::XSaveArea(kvm_xsave const& xsave) {
             *reinterpret_cast<vec128 const*>(state + ymmiHiOff));
 
         // ZMMi
-        u32 const zmmiHiOff(zmmHighHalfBase + i * 32);
-        vec256 const zmmiHi(
-            *reinterpret_cast<vec256 const*>(state + zmmiHiOff));
+        vec256 zmmiHi;
+        // If AVX-512 is not supported, keep the high bits for zmm0-zmm15
+        // zeroed.
+        if (Util::Extension::hasAvx512()) {
+            u32 const zmmHighHalfBase(Extension::cpuid(0xD, 0x6).ebx);
+            u32 const zmmiHiOff(zmmHighHalfBase + i * 32);
+            zmmiHi = *reinterpret_cast<vec256 const*>(state + zmmiHiOff);
+        }
         zmm[i] = vec512(zmmiHi.elem<u64>(3),
                         zmmiHi.elem<u64>(2),
                         zmmiHi.elem<u64>(1),
@@ -287,19 +291,21 @@ XSaveArea::XSaveArea(kvm_xsave const& xsave) {
     mxcsrMask = *reinterpret_cast<u32 const*>(state + 28);
 
     // AVX512:
-    // For i >= 16, ZMMi is fully stored at offset:
-    //  $(cpuid(eax = 0xD, ecx = 7).ebx) + i * 64.
-    // ZMMi for i < 16 we parsed above along with YMMi and XMMi.
-    u64 const highZmmBase(Extension::cpuid(0xD, 0x7).ebx);
-    for (u8 i(0); i < Vm::State::Registers::NumZmmRegs / 2; ++i) {
-        u32 const zmmiOff(highZmmBase + i * 64);
-        zmm[i + 16] = *(reinterpret_cast<vec512 const*>(state + zmmiOff));
-    }
-    // OPmask ki is @ $(cpuid(eax = 0xD, ecx = 5).ebx) + i * 8.
-    u32 const opMaskBase(Extension::cpuid(0xD, 0x5).ebx);
-    for (u8 i(0); i < Vm::State::Registers::NumKRegs; ++i) {
-        u32 const kiOff(opMaskBase + i * 8);
-        k[i] = *(reinterpret_cast<u64 const*>(state + kiOff));
+    if (Util::Extension::hasAvx512()) {
+        // For i >= 16, ZMMi is fully stored at offset:
+        //  $(cpuid(eax = 0xD, ecx = 7).ebx) + i * 64.
+        // ZMMi for i < 16 we parsed above along with YMMi and XMMi.
+        u64 const highZmmBase(Extension::cpuid(0xD, 0x7).ebx);
+        for (u8 i(0); i < Vm::State::Registers::NumZmmRegs / 2; ++i) {
+            u32 const zmmiOff(highZmmBase + i * 64);
+            zmm[i + 16] = *(reinterpret_cast<vec512 const*>(state + zmmiOff));
+        }
+        // OPmask ki is @ $(cpuid(eax = 0xD, ecx = 5).ebx) + i * 8.
+        u32 const opMaskBase(Extension::cpuid(0xD, 0x5).ebx);
+        for (u8 i(0); i < Vm::State::Registers::NumKRegs; ++i) {
+            u32 const kiOff(opMaskBase + i * 8);
+            k[i] = *(reinterpret_cast<u64 const*>(state + kiOff));
+        }
     }
 }
 
@@ -324,7 +330,6 @@ void XSaveArea::fillKvmXSave(kvm_xsave * const xsave) const {
     // We therefore need to store all three separately.
     u32 const xmmBase(160);
     u32 const ymmHighHalfBase(Extension::cpuid(0xD, 0x2).ebx);
-    u32 const zmmHighHalfBase(Extension::cpuid(0xD, 0x6).ebx);
     for (u8 i(0); i < Vm::State::Registers::NumXmmRegs; ++i) {
         // XMMi
         u32 const xmmiOff(xmmBase + i * 16);
@@ -337,12 +342,15 @@ void XSaveArea::fillKvmXSave(kvm_xsave * const xsave) const {
         *reinterpret_cast<vec128*>(state + ymmiHiOff) = ymmiHi;
 
         // ZMMi high bits
-        u32 const zmmiHiOff(zmmHighHalfBase + i * 32);
-        vec256 const zmmiHi(zmm[i].elem<u64>(7),
-                            zmm[i].elem<u64>(6),
-                            zmm[i].elem<u64>(5),
-                            zmm[i].elem<u64>(4));
-        *reinterpret_cast<vec256*>(state + zmmiHiOff) = zmmiHi;
+        if (Util::Extension::hasAvx512()) {
+            u32 const zmmHighHalfBase(Extension::cpuid(0xD, 0x6).ebx);
+            u32 const zmmiHiOff(zmmHighHalfBase + i * 32);
+            vec256 const zmmiHi(zmm[i].elem<u64>(7),
+                                zmm[i].elem<u64>(6),
+                                zmm[i].elem<u64>(5),
+                                zmm[i].elem<u64>(4));
+            *reinterpret_cast<vec256*>(state + zmmiHiOff) = zmmiHi;
+        }
     }
 
     // MXCSR and its mask are stored at offset 24.
@@ -350,19 +358,21 @@ void XSaveArea::fillKvmXSave(kvm_xsave * const xsave) const {
     *reinterpret_cast<u32*>(state + 28) = mxcsrMask;
 
     // AVX512:
-    // For i >= 16, ZMMi is fully stored at offset:
-    //  $(cpuid(eax = 0xD, ecx = 7).ebx) + i * 64.
-    // ZMMi for i < 16 were stored above along with YMMi and XMMi.
-    u64 const highZmmBase(Extension::cpuid(0xD, 0x7).ebx);
-    for (u8 i(0); i < Vm::State::Registers::NumZmmRegs / 2; ++i) {
-        u32 const zmmiOff(highZmmBase + i * 64);
-        *reinterpret_cast<vec512*>(state + zmmiOff) = zmm[i + 16];
-    }
-    // OPmask ki is @ $(cpuid(eax = 0xD, ecx = 5).ebx) + i * 8.
-    u32 const opMaskBase(Extension::cpuid(0xD, 0x5).ebx);
-    for (u8 i(0); i < Vm::State::Registers::NumKRegs; ++i) {
-        u32 const kiOff(opMaskBase + i * 8);
-        *reinterpret_cast<u64*>(state + kiOff) = k[i];
+    if (Util::Extension::hasAvx512()) {
+        // For i >= 16, ZMMi is fully stored at offset:
+        //  $(cpuid(eax = 0xD, ecx = 7).ebx) + i * 64.
+        // ZMMi for i < 16 were stored above along with YMMi and XMMi.
+        u64 const highZmmBase(Extension::cpuid(0xD, 0x7).ebx);
+        for (u8 i(0); i < Vm::State::Registers::NumZmmRegs / 2; ++i) {
+            u32 const zmmiOff(highZmmBase + i * 64);
+            *reinterpret_cast<vec512*>(state + zmmiOff) = zmm[i + 16];
+        }
+        // OPmask ki is @ $(cpuid(eax = 0xD, ecx = 5).ebx) + i * 8.
+        u32 const opMaskBase(Extension::cpuid(0xD, 0x5).ebx);
+        for (u8 i(0); i < Vm::State::Registers::NumKRegs; ++i) {
+            u32 const kiOff(opMaskBase + i * 8);
+            *reinterpret_cast<u64*>(state + kiOff) = k[i];
+        }
     }
 }
 
@@ -392,7 +402,10 @@ void setXSave(int const vcpuFd, XSaveArea const& xsave) {
     // and SSE respectively. Bit 2 indicates the presence of AVX state. Bits 5
     // to 7 indicates the presence of AVX512 state.
     u8 * const xstateBv(reinterpret_cast<u8*>(kx.region) + 512);
-    *xstateBv |= 0x7 | (1 << 5) | (1 << 6) | (1 << 7);
+    *xstateBv |= 0x7;
+    if (Util::Extension::hasAvx512()) {
+        *xstateBv |= (1 << 5) | (1 << 6) | (1 << 7);
+    }
 
     if (::ioctl(vcpuFd, KVM_SET_XSAVE, &kx) != 0) {
         throw KvmError("Cannot set guest XSAVE state", errno);

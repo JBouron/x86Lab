@@ -688,6 +688,19 @@ DECLARE_TEST(testSetRegisters) {
     // one. Fixup RIP before doing the comparison with operator==.
     current.rip --;
 
+    if (!Util::Extension::hasAvx512()) {
+        // If the host does not support AVX-512, don't include ZMM registers and
+        // K masks in the comparison.
+        for (u8 i(0); i < X86Lab::Vm::State::Registers::NumZmmRegs; ++i) {
+            current.zmm[i] = expected.zmm[i];
+        }
+
+        // Set opmask regs.
+        for (u8 i(0); i < X86Lab::Vm::State::Registers::NumKRegs; ++i) {
+            current.k[i] = expected.k[i];
+        }
+    }
+
     // FIXME: There seems to be an issue when setting CR8 through KVM_SET_SREGS.
     // For some reason, upon executing the first instruction after the
     // KVM_SET_SREGS, CR8 is reset. I unfortunately do not know enough about
@@ -1187,6 +1200,10 @@ DECLARE_TEST(testReadYmmRegisters) {
 
 // Check that getRegisters() returns the correct values of Zmm registers.
 DECLARE_TEST(testReadZmmRegisters) {
+    if (!Util::Extension::hasAvx512()) {
+        // Skip this test if AVX-512 is not supported on current host.
+        return;
+    }
     std::string const assembly(R"(
         BITS 64
 
@@ -1347,6 +1364,10 @@ DECLARE_TEST(testReadZmmRegisters) {
 // Test that getRegisters() returns the correct values of the AVX512 opmask
 // regsiters.
 DECLARE_TEST(testReadOpmaskRegisters) {
+    if (!Util::Extension::hasAvx512()) {
+        // Skip this test if AVX-512 is not supported on current host.
+        return;
+    }
     std::string const assembly(R"(
         BITS 64
 
