@@ -49,6 +49,10 @@ Snapshot::Registers State::prevRegisters() const {
     }
 }
 
+std::shared_ptr<Snapshot const> State::snapshot() const {
+    return m_latestSnapshot;
+}
+
 Backend::~Backend() {}
 
 bool Backend::init() {

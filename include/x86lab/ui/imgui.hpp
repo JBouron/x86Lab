@@ -37,21 +37,27 @@ private:
     // Position and size of all windows. Width and height of the windows are
     // expressed as a percentage of the root window's width and height. The
     // layout is as follows (not to scale):
-    // +---------+---------+
-    // |         |         |
-    // |         |         |
-    // |  CODE   |  REGS   |
-    // |         |         |
-    // |         |         |
-    // +---------+---------+
-    // |       LOGS        |
-    // +---------+---------+
+    // +---------+---------+---------+
+    // |         |         |         |
+    // |         |         |         |
+    // |  CODE   |  STACK  |   REGS  |
+    // |         |         |         |
+    // |         |         |         |
+    // +---------+---------+---------+
+    // |             LOGS            |
+    // +-----------------------------+
+    // Code window position and size are static.
     static constexpr ImVec2 codeWinPos = ImVec2(0.0f, 0.0f);
-    static constexpr ImVec2 codeWinSize = ImVec2(0.3f, 0.85f);
-    static constexpr ImVec2 regsWinPos = ImVec2(codeWinPos.x + codeWinSize.x,
-                                                0.0f);
-    static constexpr ImVec2 regsWinSize = ImVec2(1.0f - codeWinSize.x,
-                                                 codeWinSize.y);
+    static constexpr ImVec2 codeWinSize = ImVec2(0.25f, 0.85f);
+    // Stack window position is known at compilation time (since code window
+    // size and pos are known) but its size is not known: it will be computed to
+    // fit it's content.
+    static constexpr ImVec2 stackWinPos = ImVec2(codeWinPos.x + codeWinSize.x,
+                                                 0.0f);
+    // Will be computed during drawStackWin() call.
+    ImVec2 m_stackWinSize;
+    // Register window size and position can only be computed at runtime.
+
     static constexpr ImVec2 logsWinPos = ImVec2(0.0f,
                                                 codeWinPos.y + codeWinSize.y);
     static constexpr ImVec2 logsWinSize = ImVec2(1.0f, 1.0f - codeWinSize.y);
@@ -67,6 +73,7 @@ private:
     // called by draw() only.
     void drawCodeWin(ImGuiViewport const& viewport);
     void drawRegsWin(ImGuiViewport const& viewport);
+    void drawStackWin(ImGuiViewport const& viewport);
     void drawLogsWin(ImGuiViewport const& viewport);
 
     // Implementation of the abstract methods, as required by Ui::Backend.

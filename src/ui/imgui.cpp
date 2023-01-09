@@ -124,6 +124,7 @@ void Imgui::draw() {
 
     ImGuiViewport const& viewport(*ImGui::GetMainViewport());
     drawCodeWin(viewport);
+    drawStackWin(viewport);
     drawRegsWin(viewport);
     drawLogsWin(viewport);
 
@@ -171,11 +172,43 @@ void Imgui::drawCodeWin(ImGuiViewport const& viewport) {
     ImGui::End();
 }
 
+template<size_t W>
+void Imgui::drawColsForVec(vec<W> const& vec,
+                           VectorRegisterGranularity const granularity) {
+    u32 const numElems(vec.bytes / granularityToBytes.at(granularity));
+    for (int i(numElems - 1); i >= 0; --i) {
+        ImGui::TableNextColumn();
+        switch (granularity) {
+            case VectorRegisterGranularity::Byte:
+                ImGui::Text("%02hhx", vec.template elem<u8>(i));
+                break;
+            case VectorRegisterGranularity::Word:
+                ImGui::Text("%04hx", vec.template elem<u16>(i));
+                break;
+            case VectorRegisterGranularity::Dword:
+                ImGui::Text("%08x", vec.template elem<u32>(i));
+                break;
+            case VectorRegisterGranularity::Qword:
+                ImGui::Text("%016lx", vec.template elem<u64>(i));
+                break;
+            case VectorRegisterGranularity::Float:
+                ImGui::Text("%f", vec.template elem<float>(i));
+                break;
+            case VectorRegisterGranularity::Double:
+                ImGui::Text("%f", vec.template elem<double>(i));
+                break;
+            default:
+                throw std::runtime_error("Invalid granularity");
+        }
+    }
+}
+
 void Imgui::drawRegsWin(ImGuiViewport const& viewport) {
-    ImVec2 const pos(regsWinPos.x * viewport.WorkSize.x,
-                     regsWinPos.y * viewport.WorkSize.y);
-    ImVec2 const size(regsWinSize.x * viewport.WorkSize.x,
-                      regsWinSize.y * viewport.WorkSize.y);
+    // drawRegsWin must be called after drawStackWin since the size of the stack
+    // window defines the pos and size of the register window.
+    assert(!!m_stackWinSize.x && !!m_stackWinSize.y);
+    ImVec2 const pos(stackWinPos.x * viewport.WorkSize.x + m_stackWinSize.x, stackWinPos.y);
+    ImVec2 const size(viewport.WorkSize.x - pos.x, m_stackWinSize.y);
 
     ImGui::SetNextWindowPos(pos);
     ImGui::SetNextWindowSize(size);
@@ -475,35 +508,47 @@ void Imgui::drawRegsWin(ImGuiViewport const& viewport) {
     ImGui::End();
 }
 
-template<size_t W>
-void Imgui::drawColsForVec(vec<W> const& vec,
-                           VectorRegisterGranularity const granularity) {
-    u32 const numElems(vec.bytes / granularityToBytes.at(granularity));
-    for (int i(numElems - 1); i >= 0; --i) {
-        ImGui::TableNextColumn();
-        switch (granularity) {
-            case VectorRegisterGranularity::Byte:
-                ImGui::Text("%02hhx", vec.template elem<u8>(i));
-                break;
-            case VectorRegisterGranularity::Word:
-                ImGui::Text("%04hx", vec.template elem<u16>(i));
-                break;
-            case VectorRegisterGranularity::Dword:
-                ImGui::Text("%08x", vec.template elem<u32>(i));
-                break;
-            case VectorRegisterGranularity::Qword:
-                ImGui::Text("%016lx", vec.template elem<u64>(i));
-                break;
-            case VectorRegisterGranularity::Float:
-                ImGui::Text("%f", vec.template elem<float>(i));
-                break;
-            case VectorRegisterGranularity::Double:
-                ImGui::Text("%f", vec.template elem<double>(i));
-                break;
-            default:
-                throw std::runtime_error("Invalid granularity");
+void Imgui::drawStackWin(ImGuiViewport const& viewport) {
+    ImVec2 const pos(stackWinPos.x * viewport.WorkSize.x,
+                     stackWinPos.y * viewport.WorkSize.y);
+    ImGui::SetNextWindowPos(pos);
+    // Set the constraints on the stack window. We want the window to be at
+    // least as tall as the code window. The width is un-constrained, we let the
+    // window be automatically sized by its content.
+    ImVec2 const minSize(0.0f, codeWinSize.y * viewport.WorkSize.y);
+    ImVec2 const maxSize(viewport.WorkSize.x,
+                         codeWinSize.y * viewport.WorkSize.y);
+    ImGui::SetNextWindowSizeConstraints(minSize, maxSize);
+
+    ImGui::Begin("Stack", NULL, defaultWindowFlags);
+
+    // The max number of lines that can fit in the stack window. We use this to
+    // know how far we should read from the stack.
+    // FIXME: For now we do not have a way to detect the total amount of memory
+    // in the guest. Reading guest's physical memory is always valid, even when
+    // out of bounds, hence always read enough bytes from the stack to fill in
+    // the full window, even if this means outside the stack.
+    u32 const maxLines(ImGui::GetWindowContentRegionMax().y /
+        ImGui::GetTextLineHeightWithSpacing());
+
+    // Print the stack's content.
+    for (u32 i(0); i < maxLines; ++i) {
+        u64 const disp(8 * (maxLines - 1 - i));
+        u64 const offset(m_state.registers().rsp + disp);
+        std::unique_ptr<u8> const raw(
+            m_state.snapshot()->readPhysicalMemory(offset, 8));
+        u64 const val(*reinterpret_cast<u64*>(raw.get()));
+        if (!!disp) {
+            ImGui::Text("0x%016lx (+0x%03lx): 0x%016lx", offset, disp, val);
+        } else {
+            ImGui::Text("0x%016lx (rsp ->): 0x%016lx", offset, val);
         }
     }
+
+    // Save the stack window's size to compute the position and size of the
+    // register window.
+    m_stackWinSize = ImGui::GetWindowSize();
+    ImGui::End();
 }
 
 void Imgui::drawLogsWin(ImGuiViewport const& viewport) {

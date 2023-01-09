@@ -65,6 +65,9 @@ public:
     // Get the values of the registers prior to executing the last instruction.
     Snapshot::Registers prevRegisters() const;
 
+    // Get a pointer on the full snapshot associated to this State.
+    std::shared_ptr<Snapshot const> snapshot() const;
+
 private:
     Vm::OperatingState m_runState;
     std::shared_ptr<Code const> m_loadedCode;
