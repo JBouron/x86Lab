@@ -533,7 +533,10 @@ void Imgui::drawStackWin(ImGuiViewport const& viewport) {
                          codeWinSize.y * viewport.WorkSize.y);
     ImGui::SetNextWindowSizeConstraints(minSize, maxSize);
 
-    ImGui::Begin("Stack", NULL, defaultWindowFlags);
+    ImGuiWindowFlags const winFlags(defaultWindowFlags |
+                                    ImGuiWindowFlags_NoScrollbar |
+                                    ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::Begin("Stack", NULL, winFlags);
 
     // The max number of lines that can fit in the stack window. We use this to
     // know how far we should read from the stack.
@@ -541,7 +544,14 @@ void Imgui::drawStackWin(ImGuiViewport const& viewport) {
     // in the guest. Reading guest's physical memory is always valid, even when
     // out of bounds, hence always read enough bytes from the stack to fill in
     // the full window, even if this means outside the stack.
-    u32 const maxLines(ImGui::GetWindowContentRegionMax().y /
+    float const winHeight(ImGui::GetWindowSize().y);
+    float const padding(ImGui::GetStyle().WindowPadding.y);
+    float const freeHeight(winHeight - 2 * padding);
+    // After a lot of experiments, this seems to give a somewhat accurate answer
+    // as to how many lines can be printed in the window. However this seems to
+    // "break" when the window get's very tall, in which case it seems that we
+    // can fit one more line but it isn't drawn.
+    u32 const maxLines(1 + (freeHeight - ImGui::GetTextLineHeight()) /
         ImGui::GetTextLineHeightWithSpacing());
 
     // Print the stack's content.
@@ -592,12 +602,17 @@ void Imgui::drawMemWin(ImGuiViewport const& viewport) {
     ImGui::SetNextWindowSize(size);
 
     ImGuiWindowFlags const winFlags(defaultWindowFlags |
-                                    ImGuiWindowFlags_HorizontalScrollbar);
+                                    ImGuiWindowFlags_HorizontalScrollbar |
+                                    ImGuiWindowFlags_NoScrollbar |
+                                    ImGuiWindowFlags_NoScrollWithMouse);
 
     ImGui::Begin("Memory", NULL, winFlags);
 
     // The max number of lines that can fit in the memory window.
-    u32 const maxLines(ImGui::GetWindowContentRegionMax().y /
+    float const winHeight(ImGui::GetWindowSize().y);
+    float const padding(ImGui::GetStyle().WindowPadding.y);
+    float const freeHeight(winHeight - 2 * padding);
+    u32 const maxLines(1 + (freeHeight - ImGui::GetTextLineHeight()) /
         ImGui::GetTextLineHeightWithSpacing());
 
     // The start address for which the content should be displayed.
