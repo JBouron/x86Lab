@@ -519,6 +519,10 @@ void Imgui::drawStackWin(ImGuiViewport const& viewport) {
     ImVec2 const pos(stackWinPos.x * viewport.WorkSize.x,
                      stackWinPos.y * viewport.WorkSize.y);
     ImGui::SetNextWindowPos(pos);
+
+    // Force auto-fit for the window's size.
+    ImGui::SetNextWindowSize(ImVec2(0, 0));
+
     // Set the constraints on the stack window. We want the window to be at
     // least as tall as the code window. The width is un-constrained, we let the
     // window be automatically sized by its content.
@@ -623,9 +627,11 @@ void Imgui::drawMemWin(ImGuiViewport const& viewport) {
     }
     ImGui::PopStyleColor();
 
-
     // Print each memory line from startOffset.
-    for (u32 i(0); i < maxLines - 2; ++i) {
+    // Note: When the window is not focused, maxLines is 1, in which case
+    // maxLines - 2 becomes huge due to underflow. Hence make sure to only draw
+    // the memory content if maxLines >= 2.
+    for (u32 i(0); maxLines >= 2 && i < maxLines - 2; ++i) {
         u64 const offset(startOffset + i * bytesPerLine);
 
         // Offset of the memory displayed.
