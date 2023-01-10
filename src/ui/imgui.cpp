@@ -28,13 +28,14 @@ bool Imgui::doInit() {
     }
 
     SDL_WindowFlags const flags((SDL_WindowFlags)(SDL_WINDOW_RESIZABLE |
-                                                  SDL_WINDOW_ALLOW_HIGHDPI));
+                                                  SDL_WINDOW_ALLOW_HIGHDPI |
+                                                  SDL_WINDOW_MAXIMIZED));
 
     m_sdlWindow = SDL_CreateWindow(Imgui::sdlWindowTitle,
                                    SDL_WINDOWPOS_CENTERED,
                                    SDL_WINDOWPOS_CENTERED,
-                                   Imgui::sdlWinStartSizeWidth,
-                                   Imgui::sdlWinStartSizeHeight,
+                                   Imgui::sdlWinDefaultSizeWidth,
+                                   Imgui::sdlWinDefaultSizeHeight,
                                    flags);
 
     // Setup SDL_Renderer instance
@@ -214,7 +215,8 @@ void Imgui::drawRegsWin(ImGuiViewport const& viewport) {
     // drawRegsWin must be called after drawStackWin since the size of the stack
     // window defines the pos and size of the register window.
     assert(!!m_stackWinSize.x && !!m_stackWinSize.y);
-    ImVec2 const pos(stackWinPos.x * viewport.WorkSize.x + m_stackWinSize.x, stackWinPos.y);
+    ImVec2 const pos(stackWinPos.x * viewport.WorkSize.x + m_stackWinSize.x,
+                     stackWinPos.y);
     ImVec2 const size(viewport.WorkSize.x - pos.x, m_stackWinSize.y);
 
     ImGui::SetNextWindowPos(pos);

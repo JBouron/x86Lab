@@ -14,9 +14,11 @@ public:
 private:
     // The title of the SDL window showing the application.
     static constexpr char const * sdlWindowTitle = "x86Lab";
-    // Starting width and height of the SDL window.
-    static constexpr u32 sdlWinStartSizeWidth = 1280;
-    static constexpr u32 sdlWinStartSizeHeight = 720;
+    // Starting width and height of the SDL window. Note that the SDL window
+    // starts maximized, therefore those size really indicates what the default
+    // _un-maximized_ window size is.
+    static constexpr u32 sdlWinDefaultSizeWidth = 1280;
+    static constexpr u32 sdlWinDefaultSizeHeight = 720;
 
     // GUI Layout and drawing.
 
