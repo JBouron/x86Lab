@@ -54,6 +54,10 @@ bool Imgui::doInit() {
     // and no options are meant to survive restarts.
     ImGui::GetIO().IniFilename = nullptr;
 
+    ImGui::GetIO().Fonts->AddFontFromFileTTF(
+        "/home/ketza/Downloads/font/static/AzeretMono-Medium.ttf",
+        14.5);
+
     // Enable dark theme, because it's more 1337.
     ImGui::StyleColorsDark();
 
@@ -126,7 +130,10 @@ void Imgui::draw() {
     drawCodeWin(viewport);
     drawStackWin(viewport);
     drawRegsWin(viewport);
-    drawLogsWin(viewport);
+    // FIXME: For now the log window is disabled and the memory window is taking
+    // its place.
+    //drawLogsWin(viewport);
+    drawMemWin(viewport);
 
     ImGui::Render();
 
@@ -566,6 +573,96 @@ void Imgui::drawLogsWin(ImGuiViewport const& viewport) {
     }
     // Keep the scroll at the bottom of the box.
     ImGui::SetScrollHereY(1.0f);
+    ImGui::End();
+}
+
+void Imgui::drawMemWin(ImGuiViewport const& viewport) {
+    ImVec2 const pos(memWinPos.x * viewport.WorkSize.x,
+                     memWinPos.y * viewport.WorkSize.y);
+    ImVec2 const size(memWinSize.x * viewport.WorkSize.x,
+                      memWinSize.y * viewport.WorkSize.y);
+
+    ImGui::SetNextWindowPos(pos);
+    ImGui::SetNextWindowSize(size);
+
+    ImGuiWindowFlags const winFlags(defaultWindowFlags |
+                                    ImGuiWindowFlags_HorizontalScrollbar);
+
+    ImGui::Begin("Memory", NULL, winFlags);
+
+    // The max number of lines that can fit in the memory window.
+    u32 const maxLines(ImGui::GetWindowContentRegionMax().y /
+        ImGui::GetTextLineHeightWithSpacing());
+
+    // The start address for which the content should be displayed.
+    // FIXME: There should be a way to change this from the GUI.
+    u64 const startOffset(0x0);
+
+    // Fow now, the layout of the memory dump is hard-coded to 8 QWORDs per line
+    // (e.g. a cache line). There is no plan to make this dynamic (e.g. adding a
+    // shortcut to change the granularity).
+    u64 const elemSize(8);
+    u64 const bytesPerLine(64);
+    u64 const numElems(bytesPerLine / elemSize);
+
+    // Print the header with the byte offset indicators. This takes up 2 lines.
+    // Align with first element.
+    ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
+    ImGui::Text("                   ");
+    for (u32 i(0); i < numElems; ++i) {
+        u32 const offset2(i * 8);
+        u32 const offset1(offset2 + 4);
+        ImGui::SameLine();
+        ImGui::Text("   +0x%02x   +0x%02x", offset1, offset2);
+    }
+    // Align with first element.
+    ImGui::Text("                   ");
+    for (u32 i(0); i < numElems; ++i) {
+        ImGui::SameLine();
+        ImGui::Text("       |       |");
+    }
+    ImGui::PopStyleColor();
+
+
+    // Print each memory line from startOffset.
+    for (u32 i(0); i < maxLines - 2; ++i) {
+        u64 const offset(startOffset + i * bytesPerLine);
+
+        // Offset of the memory displayed.
+        ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
+        ImGui::Text("0x%016lx:", offset);
+        ImGui::PopStyleColor();
+
+        vec512 const line(
+            m_state.snapshot()->readPhysicalMemory(offset, bytesPerLine).get());
+
+        // Elements at that offset.
+        for (u32 j(0); j < numElems; ++j) {
+            ImGui::SameLine();
+            ImGui::Text("%016lx", line.elem<u64>(j));
+        }
+
+        // Hexdump in char format,
+        for (u32 j(0); j < 4; ++j) {
+            ImGui::SameLine();
+            ImGui::Spacing();
+        }
+        for (u32 j(0); j < bytesPerLine; ++j) {
+            // SameLine(0, 0) allows us to treat/print each char individually
+            // without introducing additional spacing between them.
+            ImGui::SameLine(0, 0);
+            // Replace non-printable char by a darkened "." char.
+            char const ch(line.elem<u8>(j));
+            if (std::isprint(ch)) {
+                ImGui::Text("%c", ch);
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
+                ImGui::Text(".");
+                ImGui::PopStyleColor();
+            }
+        }
+    }
+
     ImGui::End();
 }
 }

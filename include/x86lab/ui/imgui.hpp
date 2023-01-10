@@ -44,11 +44,11 @@ private:
     // |         |         |         |
     // |         |         |         |
     // +---------+---------+---------+
-    // |             LOGS            |
+    // |           MEMORY            |
     // +-----------------------------+
     // Code window position and size are static.
     static constexpr ImVec2 codeWinPos = ImVec2(0.0f, 0.0f);
-    static constexpr ImVec2 codeWinSize = ImVec2(0.25f, 0.85f);
+    static constexpr ImVec2 codeWinSize = ImVec2(0.25f, 0.70f);
     // Stack window position is known at compilation time (since code window
     // size and pos are known) but its size is not known: it will be computed to
     // fit it's content.
@@ -61,6 +61,11 @@ private:
     static constexpr ImVec2 logsWinPos = ImVec2(0.0f,
                                                 codeWinPos.y + codeWinSize.y);
     static constexpr ImVec2 logsWinSize = ImVec2(1.0f, 1.0f - codeWinSize.y);
+
+    // FIXME: For now the log window is disabled and the memory window is taking
+    // its place.
+    static constexpr ImVec2 memWinPos = logsWinPos;
+    static constexpr ImVec2 memWinSize = logsWinSize;
 
     // Colors.
     // The color of "old" register values in the history list.
@@ -75,6 +80,7 @@ private:
     void drawRegsWin(ImGuiViewport const& viewport);
     void drawStackWin(ImGuiViewport const& viewport);
     void drawLogsWin(ImGuiViewport const& viewport);
+    void drawMemWin(ImGuiViewport const& viewport);
 
     // Implementation of the abstract methods, as required by Ui::Backend.
     virtual bool doInit();
