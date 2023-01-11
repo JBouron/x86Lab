@@ -2,6 +2,7 @@
 #include <SDL.h>
 #include <sstream>
 #include <iomanip>
+#include <cmath>
 
 namespace X86Lab::Ui {
 std::map<Imgui::VectorRegisterGranularity, u32> const Imgui::granularityToBytes
@@ -604,16 +605,9 @@ void Imgui::drawMemWin(ImGuiViewport const& viewport) {
 
     ImGui::Begin("Memory", NULL, winFlags);
 
-    // The max number of lines that can fit in the memory window.
-    float const winHeight(ImGui::GetWindowSize().y);
-    float const padding(ImGui::GetStyle().WindowPadding.y);
-    float const freeHeight(winHeight - 2 * padding);
-    u32 const maxLines(1 + (freeHeight - ImGui::GetTextLineHeight()) /
-        ImGui::GetTextLineHeightWithSpacing());
-
-    // The start address for which the content should be displayed.
-    // FIXME: There should be a way to change this from the GUI.
-    u64 const startOffset(0x0);
+    // FIXME: All of the code below is really hard-coded for showing 8 QWORDs
+    // per row. There should be a way to dynamically change this from the IU,
+    // e.g. show WORDs, DWORDs, floats, ... instead.
 
     // Fow now, the layout of the memory dump is hard-coded to 8 QWORDs per line
     // (e.g. a cache line). There is no plan to make this dynamic (e.g. adding a
@@ -622,63 +616,137 @@ void Imgui::drawMemWin(ImGuiViewport const& viewport) {
     u64 const bytesPerLine(64);
     u64 const numElems(bytesPerLine / elemSize);
 
-    // Print the header with the byte offset indicators. This takes up 2 lines.
-    // Align with first element.
-    ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-    ImGui::Text("                   ");
-    for (u32 i(0); i < numElems; ++i) {
-        u32 const offset2(i * 8);
-        u32 const offset1(offset2 + 4);
-        ImGui::SameLine();
-        ImGui::Text("   +0x%02x   +0x%02x", offset1, offset2);
-    }
-    // Align with first element.
-    ImGui::Text("                   ");
-    for (u32 i(0); i < numElems; ++i) {
-        ImGui::SameLine();
-        ImGui::Text("       |       |");
-    }
-    ImGui::PopStyleColor();
+    ImGuiTableFlags const tableFlags(ImGuiTableFlags_ScrollY |
+                                     ImGuiTableFlags_SizingFixedFit);
+    ImGuiTableColumnFlags const colFlags(ImGuiTableColumnFlags_WidthFixed);
 
-    // Print each memory line from startOffset.
-    // Note: When the window is not focused, maxLines is 1, in which case
-    // maxLines - 2 becomes huge due to underflow. Hence make sure to only draw
-    // the memory content if maxLines >= 2.
-    for (u32 i(0); maxLines >= 2 && i < maxLines - 2; ++i) {
-        u64 const offset(startOffset + i * bytesPerLine);
+    // This rowHeight computation is a bit voodoo, but comes from the imgui
+    // demo so I guess we can trust it.
+    float const rowHeight(
+        ImGui::GetFontSize() + ImGui::GetStyle().CellPadding.y * 2.0f);
+    // The scroll position on the table is always set to a multiple of rowHeight
+    // so that no row is ever clipped. However we need to be careful with the
+    // last row: if the scroll position is always a multiple of rowHeight but
+    // the table's height is not, then the last row will always be clipped no
+    // matter what. Hence we need to choose a table height that is a multiple of
+    // rowHeight as well.
+    float const tableHeight(
+        std::floor(ImGui::GetContentRegionAvail().y / rowHeight) * rowHeight);
+    // Leave the width of the table to 0 so that it stretches over the entire
+    // window's width.
+    ImVec2 const outerSize(0.0f, tableHeight);
 
-        // Offset of the memory displayed.
-        ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-        ImGui::Text("0x%016lx:", offset);
-        ImGui::PopStyleColor();
+    if (ImGui::BeginTable("MemoryDump", 10, tableFlags, outerSize)) {
+        // The headers of the colums are always shown.
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Address", colFlags);
+        ImGui::TableSetupColumn("+0x00", colFlags);
+        ImGui::TableSetupColumn("+0x08", colFlags);
+        ImGui::TableSetupColumn("+0x10", colFlags);
+        ImGui::TableSetupColumn("+0x18", colFlags);
+        ImGui::TableSetupColumn("+0x20", colFlags);
+        ImGui::TableSetupColumn("+0x28", colFlags);
+        ImGui::TableSetupColumn("+0x30", colFlags);
+        ImGui::TableSetupColumn("+0x38", colFlags);
+        ImGui::TableSetupColumn("ASCII", colFlags);
+        ImGui::TableHeadersRow();
 
-        vec512 const line(
-            m_state.snapshot()->readPhysicalMemory(offset, bytesPerLine).get());
+        // Make sure the scroll position is at a multiple of rowHeight.
+        float const scrollY(ImGui::GetScrollY());
+        ImGui::SetScrollY(std::floor(scrollY / rowHeight) * rowHeight);
 
-        // Elements at that offset.
-        for (u32 j(0); j < numElems; ++j) {
-            ImGui::SameLine();
-            ImGui::Text("%016lx", line.elem<u64>(j));
-        }
+        // Print a row in the table.
+        // @param rowIdx: The index of the row. The resulting row will be for
+        // offset = rowIdx * bytesPerLine.
+        auto const printRow([&](u32 const rowIdx) {
+            u64 const offset(rowIdx * bytesPerLine);
 
-        // Hexdump in char format,
-        for (u32 j(0); j < 4; ++j) {
-            ImGui::SameLine();
-            ImGui::Spacing();
-        }
-        for (u32 j(0); j < bytesPerLine; ++j) {
-            // SameLine(0, 0) allows us to treat/print each char individually
-            // without introducing additional spacing between them.
-            ImGui::SameLine(0, 0);
-            // Replace non-printable char by a darkened "." char.
-            char const ch(line.elem<u8>(j));
-            if (std::isprint(ch)) {
-                ImGui::Text("%c", ch);
-            } else {
-                ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-                ImGui::Text(".");
-                ImGui::PopStyleColor();
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+
+            // Address.
+            ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
+            ImGui::Text("0x%016lx", offset);
+            ImGui::PopStyleColor();
+
+
+            std::shared_ptr<X86Lab::Snapshot const> const s(m_state.snapshot());
+            vec512 const line(s->readPhysicalMemory(offset,
+                                                    bytesPerLine).get());
+
+            // Elements at that offset.
+            for (u32 i(0); i < numElems; ++i) {
+                ImGui::TableNextColumn();
+                ImGui::Text("%016lx", line.elem<u64>(i));
             }
+
+            // ASCII repr.
+            ImGui::TableNextColumn();
+            for (u32 i(0); i < bytesPerLine; ++i) {
+                // Replace non-printable char by a darkened "." char.
+                char const ch(line.elem<u8>(i));
+                if (std::isprint(ch)) {
+                    ImGui::Text("%c", ch);
+                } else {
+                    ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
+                    ImGui::Text(".");
+                    ImGui::PopStyleColor();
+                }
+                // Cancel-out the newline from the previous ImGui::Text(), next
+                // char is immediately following the previous one.
+                ImGui::SameLine(0, 0);
+            }
+        });
+
+        ImGuiListClipper clipper;
+        // FIXME: What should be the limit here?
+        clipper.Begin(100);
+        while (clipper.Step()) {
+            for (int i(clipper.DisplayStart); i < clipper.DisplayEnd; ++i) {
+                printRow(i);
+            }
+        }
+
+
+        ImGui::EndTable();
+
+        // Draw separators between the addresses and the content and between
+        // the content and the ASCII repr.
+        // Note: Dear ImGui does not support only drawing borders on _some_
+        // columns hence we are forced to use the DrawList API here.
+        ImDrawList* const drawList(ImGui::GetWindowDrawList());
+        float const paddingX(ImGui::GetStyle().CellPadding.x);
+        float const paddingY(ImGui::GetStyle().CellPadding.y);
+        float const addrColWidth(ImGui::CalcTextSize("0x0000000000000000").x +
+            paddingX);
+
+        ImVec2 const winPos(ImGui::GetWindowPos());
+        ImVec2 const contentPos(ImGui::GetWindowContentRegionMin());
+        // Table position in screen space.
+        ImVec2 const tablePos(winPos.x + contentPos.x, winPos.y + contentPos.y);
+
+        // The separator spans all displayed rows of the table, excepted the
+        // first header row. Use some padding to make it pretty.
+        float const sepLen(tableHeight - rowHeight - 2 * paddingY);
+        // FIXME: Make this a static const in the Imgui class.
+        ImVec4 const sepColor(regsOldValColor);
+
+        // First separator.
+        {
+        ImVec2 const sepStart(tablePos.x + addrColWidth,
+                              tablePos.y + rowHeight + paddingY);
+        ImVec2 const sepEnd(sepStart.x, sepStart.y + sepLen);
+        drawList->AddLine(sepStart, sepEnd, ImGui::GetColorU32(sepColor));
+        }
+
+        // Second separator.
+        {
+        float const valColWidth(ImGui::CalcTextSize("0000000000000000").x +
+            2 * paddingX);
+        ImVec2 const sepStart(tablePos.x + addrColWidth + numElems*valColWidth,
+                              tablePos.y + rowHeight + paddingY);
+        ImVec2 const sepEnd(sepStart.x, sepStart.y + sepLen);
+        drawList->AddLine(sepStart, sepEnd, ImGui::GetColorU32(sepColor));
         }
     }
 
