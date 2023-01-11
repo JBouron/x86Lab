@@ -55,10 +55,6 @@ bool Imgui::doInit() {
     // and no options are meant to survive restarts.
     ImGui::GetIO().IniFilename = nullptr;
 
-    ImGui::GetIO().Fonts->AddFontFromFileTTF(
-        "/home/ketza/Downloads/font/static/AzeretMono-Medium.ttf",
-        14.5);
-
     // Enable dark theme, because it's more 1337.
     ImGui::StyleColorsDark();
 
