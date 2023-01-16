@@ -79,6 +79,7 @@ static E next(E const e) {
 }
 
 Action Imgui::doWaitForNextAction() {
+    m_isDrawingNewState = true;
     while (true) {
         // Main loop of the GUI refresh + input.
         // FIXME: Is this really the best place to put this? Maybe the GUI
@@ -96,6 +97,10 @@ Action Imgui::doWaitForNextAction() {
         }
 
         draw();
+
+        // New call to draw() will know that it is drawing the same state as
+        // before.
+        m_isDrawingNewState = false;
 
         if (ImGui::IsKeyPressed(ImGuiKey_S, true)) {
             return Action::Step;
@@ -535,34 +540,123 @@ void Imgui::drawStackWin(ImGuiViewport const& viewport) {
                                     ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::Begin("Stack", NULL, winFlags);
 
-    // The max number of lines that can fit in the stack window. We use this to
-    // know how far we should read from the stack.
-    // FIXME: For now we do not have a way to detect the total amount of memory
-    // in the guest. Reading guest's physical memory is always valid, even when
-    // out of bounds, hence always read enough bytes from the stack to fill in
-    // the full window, even if this means outside the stack.
-    float const winHeight(ImGui::GetWindowSize().y);
-    float const padding(ImGui::GetStyle().WindowPadding.y);
-    float const freeHeight(winHeight - 2 * padding);
-    // After a lot of experiments, this seems to give a somewhat accurate answer
-    // as to how many lines can be printed in the window. However this seems to
-    // "break" when the window get's very tall, in which case it seems that we
-    // can fit one more line but it isn't drawn.
-    u32 const maxLines(1 + (freeHeight - ImGui::GetTextLineHeight()) /
-        ImGui::GetTextLineHeightWithSpacing());
+    ImGuiTableFlags const tableFlags(ImGuiTableFlags_ScrollY |
+                                     ImGuiTableFlags_SizingFixedFit |
+                                     ImGuiTableFlags_BordersInnerV);
+    ImGuiTableColumnFlags const colFlags(ImGuiTableColumnFlags_WidthFixed);
+    if (ImGui::BeginTable("StackTable", 3, tableFlags)) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Address", colFlags);
+        ImGui::TableSetupColumn("Rel.", colFlags);
+        ImGui::TableSetupColumn("Value", colFlags);
+        ImGui::TableHeadersRow();
 
-    // Print the stack's content.
-    for (u32 i(0); i < maxLines; ++i) {
-        u64 const disp(8 * (maxLines - 1 - i));
-        u64 const offset(m_state.registers().rsp + disp);
-        std::unique_ptr<u8> const raw(
-            m_state.snapshot()->readPhysicalMemory(offset, 8));
-        u64 const val(*reinterpret_cast<u64*>(raw.get()));
-        if (!!disp) {
-            ImGui::Text("0x%016lx (+0x%03lx): 0x%016lx", offset, disp, val);
-        } else {
-            ImGui::Text("0x%016lx (rsp ->): 0x%016lx", offset, val);
+        u64 const rbp(m_state.registers().rbp);
+        u64 const rsp(m_state.registers().rsp);
+
+        // Draw a separator at the top of the current row. This is done
+        // everytime the start of a stack frame is detected.
+        auto const showSeparatorOnCurrentRow([&]() {
+            ImVec2 const cursorPos(ImGui::GetCursorScreenPos());
+            ImVec2 const padding(ImGui::GetStyle().CellPadding);
+            // Separator spans the entire width of the row, honoring padding.
+            float const sepLen(ImGui::GetWindowContentRegionMax().x);
+            ImVec2 const start(cursorPos.x, cursorPos.y - padding.y);
+            ImVec2 const end(start.x + sepLen, start.y);
+            ImDrawList* const drawList(ImGui::GetWindowDrawList());
+            u32 const color(ImGui::GetColorU32(stackWinFrameSeparatorColor));
+            drawList->AddLine(start, end, color,
+                              stackWinFrameSeparatorThickness);
+        });
+
+        // Compute the memory offset associated with a particular row given its
+        // id. Row with id 0 shows the oldest entry in the stack (e.g. the
+        // furthest away from current rsp).
+        // The row with max id (this id depends on the size) shows the latest
+        // entry in the stack, e.g. value pointed by rsp.
+        // @param rowId: The index of the row.
+        // @return: 64-bit offset associated with this row.
+        auto const rowIdToOffset([&](u32 const rowId) {
+            return rsp + (stackWinMaxHistory - rowId - 1) * 8;
+        });
+
+        // Check if the row with id `rowId` has an offset which coincides with
+        // the start of a stack frame. More specifically this checks of
+        // rowIdToOffset(rowId) is the beginning of any stack frame in the
+        // stack.
+        // @param rowId: The id of the row to test.
+        // @return: true if the row is the start of a frame, false otherwise.
+        auto const isRowStartOfStackFrame([&](u32 const rowId) {
+            // FIXME: This is a rather naive approach and should be optimized. A
+            // better way to do this would be to first compute all the stack
+            // frame start addresses and store them in a map, this this function
+            // becomes a simple lookup.
+            u64 const rowOffset(rowIdToOffset(rowId));
+            u64 currFrameOffset(rbp);
+            // Go up the stack frames.
+            while (currFrameOffset <= rowOffset) {
+                if (rowOffset == currFrameOffset) {
+                    // We found a stack frame starting at the row's offset.
+                    return true;
+                }
+                // currFrameOffset correspond to the RBP of the current frame,
+                // pointing to the saved previous RBP/frame.
+                std::unique_ptr<u8> const raw(
+                    m_state.snapshot()->readPhysicalMemory(currFrameOffset, 8));
+                currFrameOffset = *reinterpret_cast<u64*>(raw.get());
+            }
+            return false;
+        });
+
+        // Print a row of the table showing the stack's content.
+        // @param rowId: The index of the row in the table.
+        auto const printRow([&](u32 const rowId) {
+            u64 const currOffset(rowIdToOffset(rowId));
+
+            std::unique_ptr<u8> const raw(
+                m_state.snapshot()->readPhysicalMemory(currOffset, 8));
+            u64 const val(*reinterpret_cast<u64*>(raw.get()));
+
+            // Start new row.
+            ImGui::TableNextColumn();
+            if (isRowStartOfStackFrame(rowId)) {
+                // Add a separator at the start of each stack frame.
+                showSeparatorOnCurrentRow();
+            }
+
+            // Address column.
+            ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
+            ImGui::Text("0x%016lx", currOffset);
+            ImGui::PopStyleColor();
+
+            // Relative offset from rsp column.
+            ImGui::TableNextColumn();
+            if (currOffset == rsp) {
+                ImGui::Text("     rsp ->");
+                ImGui::SetScrollHereY();
+            } else {
+                u64 const relativeOffset(currOffset - rsp);
+                ImGui::Text("rsp + 0x%03lx", relativeOffset);
+            }
+
+            // Value column.
+            ImGui::TableNextColumn();
+            ImGui::Text("0x%016lx", val);
+        });
+
+        ImGuiListClipper clipper;
+        clipper.Begin(stackWinMaxHistory);
+        while (clipper.Step()) {
+            for (int i(clipper.DisplayStart); i < clipper.DisplayEnd; ++i) {
+                printRow(i);
+            }
         }
+
+        if (m_isDrawingNewState) {
+            // Reset the scroll to show the current RSP after each step.
+            ImGui::SetScrollY(ImGui::GetScrollMaxY());
+        }
+        ImGui::EndTable();
     }
 
     // Save the stack window's size to compute the position and size of the

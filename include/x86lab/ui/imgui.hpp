@@ -80,9 +80,32 @@ private:
     // called by draw() only.
     void drawCodeWin(ImGuiViewport const& viewport);
     void drawRegsWin(ImGuiViewport const& viewport);
+
+    // Stack window: The stack windows shows the current state of the stack in a
+    // table. Each line contains the absolute address and relative (to rsp)
+    // address of an element of the stack as well as its value.
+    // Stack frames are delimited by separators in the table.
+    //
+    // The color of the stack frame separators.
+    static constexpr ImVec4 stackWinFrameSeparatorColor = regsOldValColor;
+    // The thickness of the stack frame separators.
+    static constexpr float stackWinFrameSeparatorThickness = 1.0f;
+    // The maximum number of stack entries to be shown in the stack window. The
+    // stack windows uses a list clipper so increasing this value does not
+    // negatively impact performance.
+    static constexpr u64 stackWinMaxHistory = 1000;
+    // Draw the stack window, to be called by draw() only.
     void drawStackWin(ImGuiViewport const& viewport);
+
     void drawLogsWin(ImGuiViewport const& viewport);
     void drawMemWin(ImGuiViewport const& viewport);
+
+    // Set to true during the first call to draw() (and its helper functions)
+    // for a given state of the VM. Then false until the state changes again.
+    // This can be used by draw() and its helpers in order to differentiate
+    // between a draw on a new state and a draw on the same state as before
+    // (when drawing multiple frames while waiting for input for instance).
+    bool m_isDrawingNewState;
 
     // Implementation of the abstract methods, as required by Ui::Backend.
     virtual bool doInit();
