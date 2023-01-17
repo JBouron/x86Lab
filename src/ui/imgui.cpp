@@ -118,6 +118,15 @@ Action Imgui::doWaitForNextAction() {
 
 void Imgui::doUpdate(State const& newState) {
     m_state = newState;
+    // Re-compute the cached stack frame start offsets now that the state
+    // changed. In theory we don't _always_ need to re-compute the set here, we
+    // only need to do so if the set of stack frames changed:
+    //  1. Either by adding or a removing a frame.
+    //  2. Or removing / modifying an old one (very atypical but allowed).
+    // we _could_ keep track of the frame creation / deletion but this would be
+    // error prone especially when dealing with reverse execution. For now
+    // recomputing at every step should be fine.
+    updateStackWinStackFrameStartOffsets();
 }
 
 void Imgui::doLog(std::string const& msg) {
@@ -519,6 +528,36 @@ void Imgui::drawRegsWin(ImGuiViewport const& viewport) {
     ImGui::End();
 }
 
+void Imgui::updateStackWinStackFrameStartOffsets() {
+    m_stackWinStackFrameStartOffsets.clear();
+    // Find all offsets corresponding to the start of stack frames by reading
+    // the stack and all saved RBPs. In the worst case scenario we would need to
+    // find the last stackWinMaxHistory stack frames, any older frame would not
+    // show up in the stack window anyway, hence skipping. This puts a bound on
+    // the number of lookups however we still have the problem that we cannot
+    // reliably determine what is a stack frame and what isn't: maybe the
+    // application/function is not creating stack frames in a "standard" fashion
+    // (e.g. good old `push  rbp ; mov rbp, rsp`)? So we might read some garbage
+    // data. A rule of thumb to avoid reading too much garbage is to stop when
+    // we see that a saved rbp is < rsp, such a stack frame would be invalid,
+    // except in some very peculiar situation (for instance if there is a wrap
+    // around when pushing on the stack); this should be sufficient for 99.99%
+    // of the cases.
+    u64 const rbp(m_state.registers().rbp);
+    u64 const rsp(m_state.registers().rsp);
+    u64 currFrameStartOffset(rbp);
+    while (rsp <= currFrameStartOffset &&
+           m_stackWinStackFrameStartOffsets.size() <= stackWinMaxHistory) {
+        m_stackWinStackFrameStartOffsets.insert(currFrameStartOffset);
+
+        // Move to next stack frame, follow the saved RBP "linked
+        // list".
+        currFrameStartOffset = *reinterpret_cast<u64*>(
+            m_state.snapshot()->readPhysicalMemory(
+                currFrameStartOffset, 8).get());
+    }
+}
+
 void Imgui::drawStackWin(ImGuiViewport const& viewport) {
     ImVec2 const pos(stackWinPos.x * viewport.WorkSize.x,
                      stackWinPos.y * viewport.WorkSize.y);
@@ -551,7 +590,6 @@ void Imgui::drawStackWin(ImGuiViewport const& viewport) {
         ImGui::TableSetupColumn("Value", colFlags);
         ImGui::TableHeadersRow();
 
-        u64 const rbp(m_state.registers().rbp);
         u64 const rsp(m_state.registers().rsp);
 
         // Draw a separator at the top of the current row. This is done
@@ -587,25 +625,8 @@ void Imgui::drawStackWin(ImGuiViewport const& viewport) {
         // @param rowId: The id of the row to test.
         // @return: true if the row is the start of a frame, false otherwise.
         auto const isRowStartOfStackFrame([&](u32 const rowId) {
-            // FIXME: This is a rather naive approach and should be optimized. A
-            // better way to do this would be to first compute all the stack
-            // frame start addresses and store them in a map, this this function
-            // becomes a simple lookup.
             u64 const rowOffset(rowIdToOffset(rowId));
-            u64 currFrameOffset(rbp);
-            // Go up the stack frames.
-            while (currFrameOffset <= rowOffset) {
-                if (rowOffset == currFrameOffset) {
-                    // We found a stack frame starting at the row's offset.
-                    return true;
-                }
-                // currFrameOffset correspond to the RBP of the current frame,
-                // pointing to the saved previous RBP/frame.
-                std::unique_ptr<u8> const raw(
-                    m_state.snapshot()->readPhysicalMemory(currFrameOffset, 8));
-                currFrameOffset = *reinterpret_cast<u64*>(raw.get());
-            }
-            return false;
+            return m_stackWinStackFrameStartOffsets.contains(rowOffset);
         });
 
         // Print a row of the table showing the stack's content.

@@ -3,6 +3,8 @@
 #include "imgui_impl_sdl.h"
 #include "imgui_impl_sdlrenderer.h"
 
+#include <set>
+
 namespace X86Lab::Ui {
 
 // Ui::Backend implementation using Dear ImGui running with SDL renderer.
@@ -94,6 +96,14 @@ private:
     // stack windows uses a list clipper so increasing this value does not
     // negatively impact performance.
     static constexpr u64 stackWinMaxHistory = 1000;
+    // Keep track of the start offset of the last stackWinMaxHistory stack
+    // frames. Re-computed everytime the state of the VM changes. This set is
+    // meant to avoid recomputing the frame offsets everytime the screen is
+    // refresh while the VM state stays un-changed.
+    std::set<u64> m_stackWinStackFrameStartOffsets;
+    // Re-compute the m_stackWinStackFrameStartOffsets. Called everytime the
+    // VM's state changes.
+    void updateStackWinStackFrameStartOffsets();
     // Draw the stack window, to be called by draw() only.
     void drawStackWin(ImGuiViewport const& viewport);
 
