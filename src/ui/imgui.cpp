@@ -154,6 +154,13 @@ void Imgui::draw() {
 }
 
 void Imgui::drawCodeWin(ImGuiViewport const& viewport) {
+    std::string const fileName(m_state.sourceFileName());
+    if (!fileName.size()) {
+        // A the beginning of program execution, the state could be default and
+        // therefore no source file set yet. In this case there is nothing to
+        // draw.
+        return;
+    }
     ImVec2 const pos(codeWinPos.x * viewport.WorkSize.x,
                      codeWinPos.y * viewport.WorkSize.y);
     ImVec2 const size(codeWinSize.x * viewport.WorkSize.x,
@@ -169,52 +176,45 @@ void Imgui::drawCodeWin(ImGuiViewport const& viewport) {
                                      ImGuiTableFlags_BordersInnerV |
                                      ImGuiTableFlags_ScrollY);
     if (ImGui::BeginTable("CodeTable", 2, tableFlags)) {
-        std::string const fileName(m_state.sourceFileName());
-        // A the beginning of program execution, the state could be default and
-        // therefore no source file set yet.
-        if (!!fileName.size()) {
-            std::ifstream file(fileName, std::ios::in);
-            u64 const currLine(m_state.currentLine());
-            ImVec2 const padding(ImGui::GetStyle().CellPadding);
-            float const rowHeight(ImGui::GetFontSize() + padding.y * 2.0f);
-            ImDrawList* const drawList(ImGui::GetWindowDrawList());
-            u64 lineNum(0);
-            for (std::string line; std::getline(file, line);) {
-                // Line column.
-                lineNum ++;
+        std::ifstream file(fileName, std::ios::in);
+        u64 const currLine(m_state.currentLine());
+        ImVec2 const padding(ImGui::GetStyle().CellPadding);
+        float const rowHeight(ImGui::GetFontSize() + padding.y * 2.0f);
+        ImDrawList* const drawList(ImGui::GetWindowDrawList());
+        u64 lineNum(0);
+        for (std::string line; std::getline(file, line);) {
+            // Line column.
+            lineNum ++;
 
-                ImGui::TableNextColumn();
-                if (lineNum == currLine) {
-                    if (m_isDrawingNewState) {
-                        // Center on current instruction when stepping
-                        // through.
-                        ImGui::SetScrollHereY(0.5);
-                    }
-
-                    // Change the background color for this line only.
-                    // Unfortunately there is no easy way to set a background
-                    // color on a single row of a table, hence we are
-                    // constrained to draw a rectangle over the entire row
-                    // ourselves.
-                    ImVec2 const cursorPos(ImGui::GetCursorScreenPos());
-                    ImVec2 const rectMin(cursorPos.x - padding.x,
-                                         cursorPos.y - padding.y);
-                    float const rectWidth(ImGui::GetWindowContentRegionMax().x);
-                    float const rectHeight(rowHeight);
-                    ImVec2 const rectMax(rectMin.x + rectWidth,
-                                         rectMin.y + rectHeight);
-                    u32 const color(ImGui::GetColorU32(codeWinCurrLineBgColor));
-                    drawList->AddRectFilled(rectMin, rectMax, color);
+            ImGui::TableNextColumn();
+            if (lineNum == currLine) {
+                if (m_isDrawingNewState) {
+                    // Center on current instruction when stepping
+                    // through.
+                    ImGui::SetScrollHereY(0.5);
                 }
 
-                ImGui::Text("%ld ", lineNum);
-
-                // Instruction colum.
-                ImGui::TableNextColumn();
-                ImGui::Text(" %s", line.c_str());
+                // Change the background color for this line only. Unfortunately
+                // there is no easy way to set a background color on a single
+                // row of a table, hence we are constrained to draw a rectangle
+                // over the entire row ourselves.
+                ImVec2 const cursorPos(ImGui::GetCursorScreenPos());
+                ImVec2 const rectMin(cursorPos.x - padding.x,
+                                     cursorPos.y - padding.y);
+                float const rectWidth(ImGui::GetWindowContentRegionMax().x);
+                float const rectHeight(rowHeight);
+                ImVec2 const rectMax(rectMin.x + rectWidth,
+                                     rectMin.y + rectHeight);
+                u32 const color(ImGui::GetColorU32(codeWinCurrLineBgColor));
+                drawList->AddRectFilled(rectMin, rectMax, color);
             }
-        }
 
+            ImGui::Text("%ld ", lineNum);
+
+            // Instruction colum.
+            ImGui::TableNextColumn();
+            ImGui::Text(" %s", line.c_str());
+        }
         ImGui::EndTable();
     }
 
