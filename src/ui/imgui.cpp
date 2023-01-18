@@ -462,7 +462,8 @@ void Imgui::drawRegsWin(ImGuiViewport const& viewport) {
     // Vector registers are printed out in tables, the following flags control
     // the drawing of those tables.
     ImGuiTableFlags const vecRegTableFlags(ImGuiTableFlags_ScrollX |
-                                           ImGuiTableFlags_BordersV);
+                                           ImGuiTableFlags_ScrollY |
+                                           ImGuiTableFlags_BordersInnerV);
     ImGuiTableColumnFlags const vecRegColFlags(
         ImGuiTableColumnFlags_WidthFixed);
 
@@ -484,6 +485,7 @@ void Imgui::drawRegsWin(ImGuiViewport const& viewport) {
 
         if (ImGui::BeginTable("MMX", numCols, vecRegTableFlags)) {
             // Name column.
+            ImGui::TableSetupScrollFreeze(1, 1);
             ImGui::TableSetupColumn("Reg.", vecRegColFlags);
             // Element column, named after the index of each element in the
             // vector.
@@ -521,6 +523,7 @@ void Imgui::drawRegsWin(ImGuiViewport const& viewport) {
 
         if (ImGui::BeginTable("SSE/AVX", numCols, vecRegTableFlags)) {
             // Set up column names: regs 8 7 6 ... 0
+            ImGui::TableSetupScrollFreeze(1, 1);
             ImGui::TableSetupColumn("Reg.", vecRegColFlags);
             for (u32 i(0); i < numCols - 1; ++i) {
                 ImGui::TableSetupColumn(std::to_string((numCols-2) - i).c_str(),

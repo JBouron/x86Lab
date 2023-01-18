@@ -2427,7 +2427,9 @@ struct IMGUI_API ImGuiTabBar
 // 65 and it seems to be working fine so far. This could be due to the fact that
 // x86Lab uses very basic table features (e.g. no sorting or re-ordering).
 #define IMGUI_TABLE_MAX_COLUMNS         65                  // sizeof(ImU64) * 8. This is solely because we frequently encode columns set in a ImU64.
-#define IMGUI_TABLE_MAX_DRAW_CHANNELS   (4 + 64 * 2)        // See TableSetupDrawChannels()
+// Note [JBouron/x86Lab]: Need to bump this limit as well when freezing
+// rows/cols.
+#define IMGUI_TABLE_MAX_DRAW_CHANNELS   (4 + 65 * 2)        // See TableSetupDrawChannels()
 
 // Our current column maximum is 64 but we may raise that in the future.
 typedef ImS8 ImGuiTableColumnIdx;
