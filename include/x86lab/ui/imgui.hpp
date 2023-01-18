@@ -78,8 +78,8 @@ private:
     // (Re-)draw the GUI.
     void draw();
 
-    // Helper functions for drawing code, register and logs windows. To be
-    // called by draw() only.
+    // Background color of the current line / instruction in the code window.
+    static constexpr ImVec4 codeWinCurrLineBgColor = ImVec4(0.18, 0.18, 0.2, 1);
     void drawCodeWin(ImGuiViewport const& viewport);
     void drawRegsWin(ImGuiViewport const& viewport);
 
