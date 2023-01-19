@@ -108,6 +108,16 @@ private:
     void drawStackWin(ImGuiViewport const& viewport);
 
     void drawLogsWin(ImGuiViewport const& viewport);
+
+    // The focused address in the memory dump in the memory window. The table
+    // scrolls to this address. Can be changed using the input field.
+    u64 m_memWinFocusedAddr;
+    // Legend for the focus address input field.
+    static constexpr char const * memWinInputFieldText = "Jump to (hex):";
+    // The number of lines to show in the memory dump. FIXME: This really
+    // shouldn't be hardcoded. Since we are using a clipper we can get away with
+    // showing the entire physical memory.
+    static constexpr u64 memWinDumpLines = 1000;
     void drawMemWin(ImGuiViewport const& viewport);
 
     // Set to true during the first call to draw() (and its helper functions)

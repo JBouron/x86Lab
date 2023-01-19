@@ -751,7 +751,7 @@ void Imgui::drawMemWin(ImGuiViewport const& viewport) {
                                     ImGuiWindowFlags_NoScrollbar |
                                     ImGuiWindowFlags_NoScrollWithMouse);
 
-    ImGui::Begin("Memory", NULL, winFlags);
+    ImGui::Begin("Physical Memory", NULL, winFlags);
 
     // FIXME: All of the code below is really hard-coded for showing 8 QWORDs
     // per row. There should be a way to dynamically change this from the IU,
@@ -764,14 +764,53 @@ void Imgui::drawMemWin(ImGuiViewport const& viewport) {
     u64 const bytesPerLine(64);
     u64 const numElems(bytesPerLine / elemSize);
 
+    ImGuiStyle const& style(ImGui::GetStyle());
+
+    // First widget: InputText field to select the currently focused address.
+
+    // Print legend, AlignTextToFramePadding makes sure the text will be
+    // centered with the input text.
+    ImGui::AlignTextToFramePadding();
+    ImGui::Text(memWinInputFieldText);
+    ImGui::SameLine();
+
+    // Where the input address will be stored, need enough space to input a
+    // 64-bit address in hex format (without the "0x" prefix) + NUL char.
+    char inputBuf[17] = {0};
+    // Keep the input widget only as wide as it needs to be, e.g. just enough to
+    // contain a 64-bit address in hex format.
+    ImGui::SetNextItemWidth(sizeof(inputBuf) * ImGui::CalcTextSize("0").x +
+                            style.FramePadding.x * 2.0f);
+    // Input widget, returns true if contains some input.
+    ImGuiInputTextFlags const inputFlags(ImGuiInputTextFlags_AutoSelectAll |
+                                         ImGuiInputTextFlags_CharsHexadecimal);
+    bool const focusedAddrChanged(
+        ImGui::InputText("##in", inputBuf, sizeof(inputBuf), inputFlags));
+    if (focusedAddrChanged) {
+        if (!!::strlen(inputBuf)) {
+            std::istringstream iss(inputBuf);
+
+            // If the buffer is empty at this point the input is set to 0.
+            u64 input;
+            iss >> std::hex >> input;
+
+            // Keep the memory dump aligned on bytesPerLine.
+            m_memWinFocusedAddr = bytesPerLine * (input / bytesPerLine);
+        } else {
+            // Buffer might be empty after erasing the content of the input
+            // field, in this case reset to focusing on 0.
+            m_memWinFocusedAddr = 0;
+        }
+    }
+
+    // Second widget: The table showing the memory dump.
     ImGuiTableFlags const tableFlags(ImGuiTableFlags_ScrollY |
                                      ImGuiTableFlags_SizingFixedFit);
     ImGuiTableColumnFlags const colFlags(ImGuiTableColumnFlags_WidthFixed);
 
     // This rowHeight computation is a bit voodoo, but comes from the imgui
     // demo so I guess we can trust it.
-    float const rowHeight(
-        ImGui::GetFontSize() + ImGui::GetStyle().CellPadding.y * 2.0f);
+    float const rowHeight(ImGui::GetFontSize() + style.CellPadding.y * 2.0f);
     // The scroll position on the table is always set to a multiple of rowHeight
     // so that no row is ever clipped. However we need to be careful with the
     // last row: if the scroll position is always a multiple of rowHeight but
@@ -783,6 +822,7 @@ void Imgui::drawMemWin(ImGuiViewport const& viewport) {
     // Leave the width of the table to 0 so that it stretches over the entire
     // window's width.
     ImVec2 const outerSize(0.0f, tableHeight);
+    ImVec2 const tablePos(ImGui::GetCursorScreenPos());
 
     if (ImGui::BeginTable("MemoryDump", 10, tableFlags, outerSize)) {
         // The headers of the colums are always shown.
@@ -799,9 +839,21 @@ void Imgui::drawMemWin(ImGuiViewport const& viewport) {
         ImGui::TableSetupColumn("ASCII", colFlags);
         ImGui::TableHeadersRow();
 
-        // Make sure the scroll position is at a multiple of rowHeight.
-        float const scrollY(ImGui::GetScrollY());
-        ImGui::SetScrollY(std::floor(scrollY / rowHeight) * rowHeight);
+        if (focusedAddrChanged) {
+            // Immediately honor the requested focus address and change the
+            // scroll position so that that address is the first line in the
+            // dump. We need to do that _before_ drawing using the clipper so
+            // the clipper is computing the correct range (e.g. starting at
+            // focusedRowIdx).
+            u64 const focusedRowIdx(m_memWinFocusedAddr / bytesPerLine);
+            ImGui::SetScrollY(focusedRowIdx * rowHeight);
+        } else {
+            // Make sure the scroll position is at a multiple of rowHeight. Note
+            // that the if block above guarantees this when focusing on a
+            // particular address, hence not needed in that case.
+            float const scrollY(ImGui::GetScrollY());
+            ImGui::SetScrollY(std::floor(scrollY / rowHeight) * rowHeight);
+        }
 
         // Print a row in the table.
         // @param rowIdx: The index of the row. The resulting row will be for
@@ -847,8 +899,7 @@ void Imgui::drawMemWin(ImGuiViewport const& viewport) {
         });
 
         ImGuiListClipper clipper;
-        // FIXME: What should be the limit here?
-        clipper.Begin(100);
+        clipper.Begin(memWinDumpLines);
         while (clipper.Step()) {
             for (int i(clipper.DisplayStart); i < clipper.DisplayEnd; ++i) {
                 printRow(i);
@@ -863,15 +914,10 @@ void Imgui::drawMemWin(ImGuiViewport const& viewport) {
         // Note: Dear ImGui does not support only drawing borders on _some_
         // columns hence we are forced to use the DrawList API here.
         ImDrawList* const drawList(ImGui::GetWindowDrawList());
-        float const paddingX(ImGui::GetStyle().CellPadding.x);
-        float const paddingY(ImGui::GetStyle().CellPadding.y);
+        float const paddingX(style.CellPadding.x);
+        float const paddingY(style.CellPadding.y);
         float const addrColWidth(ImGui::CalcTextSize("0x0000000000000000").x +
             paddingX);
-
-        ImVec2 const winPos(ImGui::GetWindowPos());
-        ImVec2 const contentPos(ImGui::GetWindowContentRegionMin());
-        // Table position in screen space.
-        ImVec2 const tablePos(winPos.x + contentPos.x, winPos.y + contentPos.y);
 
         // The separator spans all displayed rows of the table, excepted the
         // first header row. Use some padding to make it pretty.
