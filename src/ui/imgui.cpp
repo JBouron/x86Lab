@@ -5,21 +5,10 @@
 #include <cmath>
 
 namespace X86Lab::Ui {
-std::map<Imgui::VectorRegisterGranularity, u32> const Imgui::granularityToBytes
-    = {
-    {Imgui::VectorRegisterGranularity::Byte,   1},
-    {Imgui::VectorRegisterGranularity::Word,   2},
-    {Imgui::VectorRegisterGranularity::Dword,  4},
-    {Imgui::VectorRegisterGranularity::Qword,  8},
-    {Imgui::VectorRegisterGranularity::Float,  4},
-    {Imgui::VectorRegisterGranularity::Double, 8},
-};
 
 // SDL window and renderer left to nullptr until doInit() is called on this
 // backend.
-Imgui::Imgui() : m_sdlWindow(nullptr),
-                 m_sdlRenderer(nullptr),
-                 m_currentGranularity(VectorRegisterGranularity::Qword) {}
+Imgui::Imgui() : m_sdlWindow(nullptr), m_sdlRenderer(nullptr) {}
 
 bool Imgui::doInit() {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
@@ -62,24 +51,16 @@ bool Imgui::doInit() {
     // Necessary init for using SDL and SDL_Renderer with ImGui.
     ImGui_ImplSDL2_InitForSDLRenderer(m_sdlWindow, m_sdlRenderer);
     ImGui_ImplSDLRenderer_Init(m_sdlRenderer);
+
+    // Initialize windows.
+    m_codeWindow = std::make_unique<CodeWindow>();
+    m_stackWindow = std::make_unique<StackWindow>();
+    m_registerWindow = std::make_unique<RegisterWindow>();
+    m_memoryWindow = std::make_unique<MemoryWindow>();
     return true;
 }
 
-// Compute the next value of an enum, wrapping around to the first value of the
-// enumeration if needed. This assume that the type of the enum (E) contains a
-// value called "__MAX" which appears last in the enum's declaration.
-// @param e: The value for which the next value should be computed.
-// @return: The value appearing after `e` in E's declaration, if this is "__MAX"
-// then this returns the first declared value in E.
-template<typename E>
-static E next(E const e) {
-    int const curr(static_cast<int>(e));
-    int const max(static_cast<int>(E::__MAX));
-    return static_cast<E>((curr + 1) % max);
-}
-
 Action Imgui::doWaitForNextAction() {
-    m_isDrawingNewState = true;
     while (true) {
         // Main loop of the GUI refresh + input.
         // FIXME: Is this really the best place to put this? Maybe the GUI
@@ -98,17 +79,13 @@ Action Imgui::doWaitForNextAction() {
 
         draw();
 
-        // New call to draw() will know that it is drawing the same state as
-        // before.
-        m_isDrawingNewState = false;
-
         if (ImGui::IsKeyPressed(ImGuiKey_S, true)) {
             return Action::Step;
         } else if (ImGui::IsKeyPressed(ImGuiKey_R, true)) {
             return Action::ReverseStep;
         } else if (ImGui::IsKeyPressed(ImGuiKey_Tab, false)) {
             // Toggle the next granularity.
-            m_currentGranularity = next(m_currentGranularity);
+            m_registerWindow->nextGranularity();
         } else if (ImGui::IsKeyPressed(ImGuiKey_Q, false)) {
             return Action::Quit;
         }
@@ -118,15 +95,6 @@ Action Imgui::doWaitForNextAction() {
 
 void Imgui::doUpdate(State const& newState) {
     m_state = newState;
-    // Re-compute the cached stack frame start offsets now that the state
-    // changed. In theory we don't _always_ need to re-compute the set here, we
-    // only need to do so if the set of stack frames changed:
-    //  1. Either by adding or a removing a frame.
-    //  2. Or removing / modifying an old one (very atypical but allowed).
-    // we _could_ keep track of the frame creation / deletion but this would be
-    // error prone especially when dealing with reverse execution. For now
-    // recomputing at every step should be fine.
-    updateStackWinStackFrameStartOffsets();
 }
 
 void Imgui::doLog(std::string const& msg) {
@@ -139,435 +107,131 @@ void Imgui::draw() {
     ImGui::NewFrame();
 
     ImGuiViewport const& viewport(*ImGui::GetMainViewport());
-    drawCodeWin(viewport);
-    drawStackWin(viewport);
-    drawRegsWin(viewport);
+    ImVec2 const work(viewport.WorkSize);
+
+    // Code window
+    ImVec2 const cwPos(codeWinPos.x * work.x, codeWinPos.y * work.y);
+    ImVec2 const cwSize(codeWinSize.x * work.x, codeWinSize.y * work.y);
+    m_codeWindow->draw(cwPos, cwSize, m_state);
+
+    // Stack window. Must be drawn before the registers window since the
+    // register window needs to know the size of the stack window to compute its
+    // position.
+    ImVec2 const swPos(stackWinPos.x * work.x, stackWinPos.y * work.y);
+    // Auto-size the window horizontally to fit content.
+    ImVec2 const swSize(0, codeWinSize.y * work.y);
+    m_stackWinSize = m_stackWindow->draw(swPos, swSize, m_state);
+
+    // Registers window.
+    assert(!!m_stackWinSize.x && !!m_stackWinSize.y);
+    ImVec2 const rwPos(stackWinPos.x * work.x + m_stackWinSize.x,stackWinPos.y);
+    ImVec2 const rwSize(work.x - rwPos.x, m_stackWinSize.y);
+    m_registerWindow->draw(rwPos, rwSize, m_state);
+
+    // Memory window.
+    ImVec2 const mwPos(memWinPos.x * work.x, memWinPos.y * work.y);
+    ImVec2 const mwSize(memWinSize.x * work.x, memWinSize.y * work.y);
+    m_memoryWindow->draw(mwPos, mwSize, m_state);
+
     // FIXME: For now the log window is disabled and the memory window is taking
     // its place.
-    //drawLogsWin(viewport);
-    drawMemWin(viewport);
 
     ImGui::Render();
-
     ImGui_ImplSDLRenderer_RenderDrawData(ImGui::GetDrawData());
     SDL_RenderPresent(m_sdlRenderer);
 }
 
-void Imgui::drawCodeWin(ImGuiViewport const& viewport) {
-    std::string const fileName(m_state.sourceFileName());
+Imgui::Window::Window(std::string const& title, ImGuiWindowFlags const flags) :
+    m_title(title), m_flags(flags) {}
+
+ImVec2 Imgui::Window::draw(ImVec2 const& position,
+                           ImVec2 const& size,
+                           State const& state) {
+    ImGui::SetNextWindowPos(position);
+    ImGui::SetNextWindowSize(size);
+    ImGui::Begin(m_title.c_str(), NULL, m_flags);
+    doDraw(state);
+    ImVec2 const actualSize(ImGui::GetWindowSize());
+    ImGui::End();
+    return actualSize;
+}
+
+Imgui::CodeWindow::CodeWindow() :
+    Window(defaultTitle, Imgui::defaultWindowFlags),
+    m_previousRip(~((u64)0)) {}
+
+void Imgui::CodeWindow::doDraw(State const& state) {
+    std::string const fileName(state.sourceFileName());
     if (!fileName.size()) {
         // A the beginning of program execution, the state could be default and
         // therefore no source file set yet. In this case there is nothing to
         // draw.
         return;
     }
-    ImVec2 const pos(codeWinPos.x * viewport.WorkSize.x,
-                     codeWinPos.y * viewport.WorkSize.y);
-    ImVec2 const size(codeWinSize.x * viewport.WorkSize.x,
-                      codeWinSize.y * viewport.WorkSize.y);
-    ImGui::SetNextWindowPos(codeWinPos);
-    ImGui::SetNextWindowSize(size);
 
-    // The code window is always centered on the current instruction, disable
-    // scrolling.
-    ImGuiWindowFlags const flags(defaultWindowFlags);
-    ImGui::Begin("Code", NULL, flags);
     ImGuiTableFlags const tableFlags(ImGuiTableFlags_SizingFixedFit |
                                      ImGuiTableFlags_BordersInnerV |
                                      ImGuiTableFlags_ScrollY);
-    if (ImGui::BeginTable("CodeTable", 2, tableFlags)) {
-        std::ifstream file(fileName, std::ios::in);
-        u64 const currLine(m_state.currentLine());
-        ImVec2 const padding(ImGui::GetStyle().CellPadding);
-        float const rowHeight(ImGui::GetFontSize() + padding.y * 2.0f);
-        ImDrawList* const drawList(ImGui::GetWindowDrawList());
-        u64 lineNum(0);
-        for (std::string line; std::getline(file, line);) {
-            // Line column.
-            lineNum ++;
-
-            ImGui::TableNextColumn();
-            if (lineNum == currLine) {
-                if (m_isDrawingNewState) {
-                    // Center on current instruction when stepping
-                    // through.
-                    ImGui::SetScrollHereY(0.5);
-                }
-
-                // Change the background color for this line only. Unfortunately
-                // there is no easy way to set a background color on a single
-                // row of a table, hence we are constrained to draw a rectangle
-                // over the entire row ourselves.
-                ImVec2 const cursorPos(ImGui::GetCursorScreenPos());
-                ImVec2 const rectMin(cursorPos.x - padding.x,
-                                     cursorPos.y - padding.y);
-                float const rectWidth(ImGui::GetWindowContentRegionMax().x);
-                float const rectHeight(rowHeight);
-                ImVec2 const rectMax(rectMin.x + rectWidth,
-                                     rectMin.y + rectHeight);
-                u32 const color(ImGui::GetColorU32(codeWinCurrLineBgColor));
-                drawList->AddRectFilled(rectMin, rectMax, color);
-            }
-
-            ImGui::Text("%ld ", lineNum);
-
-            // Instruction colum.
-            ImGui::TableNextColumn();
-            ImGui::Text(" %s", line.c_str());
-        }
-        ImGui::EndTable();
+    if (!ImGui::BeginTable("CodeTable", 2, tableFlags)) {
+        return;
     }
 
-    ImGui::End();
-}
+    bool const isDrawingNewState(m_previousRip != state.registers().rip);
+    m_previousRip = state.registers().rip;
 
-template<size_t W>
-void Imgui::drawColsForVec(vec<W> const& vec,
-                           VectorRegisterGranularity const granularity) {
-    u32 const numElems(vec.bytes / granularityToBytes.at(granularity));
-    for (int i(numElems - 1); i >= 0; --i) {
+    std::ifstream file(fileName, std::ios::in);
+    u64 const currLine(state.currentLine());
+    ImVec2 const padding(ImGui::GetStyle().CellPadding);
+    float const rowHeight(ImGui::GetFontSize() + padding.y * 2.0f);
+    ImDrawList* const drawList(ImGui::GetWindowDrawList());
+    u64 lineNum(0);
+    for (std::string line; std::getline(file, line);) {
+        // Line column.
+        lineNum ++;
+
         ImGui::TableNextColumn();
-        switch (granularity) {
-            case VectorRegisterGranularity::Byte:
-                ImGui::Text("%02hhx", vec.template elem<u8>(i));
-                break;
-            case VectorRegisterGranularity::Word:
-                ImGui::Text("%04hx", vec.template elem<u16>(i));
-                break;
-            case VectorRegisterGranularity::Dword:
-                ImGui::Text("%08x", vec.template elem<u32>(i));
-                break;
-            case VectorRegisterGranularity::Qword:
-                ImGui::Text("%016lx", vec.template elem<u64>(i));
-                break;
-            case VectorRegisterGranularity::Float:
-                ImGui::Text("%f", vec.template elem<float>(i));
-                break;
-            case VectorRegisterGranularity::Double:
-                ImGui::Text("%f", vec.template elem<double>(i));
-                break;
-            default:
-                throw std::runtime_error("Invalid granularity");
+        if (lineNum == currLine) {
+            if (isDrawingNewState) {
+                // Center on current instruction when stepping
+                // through.
+                ImGui::SetScrollHereY(0.5);
+            }
+
+            // Change the background color for this line only. Unfortunately
+            // there is no easy way to set a background color on a single row of
+            // a table, hence we are constrained to draw a rectangle over the
+            // entire row ourselves.
+            ImVec2 const cursorPos(ImGui::GetCursorScreenPos());
+            ImVec2 const rectMin(cursorPos.x - padding.x,
+                                 cursorPos.y - padding.y);
+            float const rectWidth(ImGui::GetWindowContentRegionMax().x);
+            float const rectHeight(rowHeight);
+            ImVec2 const rectMax(rectMin.x + rectWidth,
+                                 rectMin.y + rectHeight);
+            u32 const color(ImGui::GetColorU32(currLineBgColor));
+            drawList->AddRectFilled(rectMin, rectMax, color);
         }
+
+        ImGui::Text("%ld ", lineNum);
+
+        // Instruction colum.
+        ImGui::TableNextColumn();
+        ImGui::Text(" %s", line.c_str());
     }
+    ImGui::EndTable();
 }
 
-void Imgui::drawRegsWin(ImGuiViewport const& viewport) {
-    // drawRegsWin must be called after drawStackWin since the size of the stack
-    // window defines the pos and size of the register window.
-    assert(!!m_stackWinSize.x && !!m_stackWinSize.y);
-    ImVec2 const pos(stackWinPos.x * viewport.WorkSize.x + m_stackWinSize.x,
-                     stackWinPos.y);
-    ImVec2 const size(viewport.WorkSize.x - pos.x, m_stackWinSize.y);
+Imgui::StackWindow::StackWindow() : Window(defaultTitle, windowFlags),
+                                    m_previousRbp(~((u64)0)),
+                                    m_previousRsp(~((u64)0)) {}
 
-    ImGui::SetNextWindowPos(pos);
-    ImGui::SetNextWindowSize(size);
-
-    ImGui::Begin("Registers", NULL, defaultWindowFlags);
-    ImGui::BeginTabBar("##tabs", 0);
-
-    // General purpose registers.
-    if (ImGui::BeginTabItem("General Purpose", NULL, 0)) {
-        ImGui::Text("  -- General Purpose --");
-        // Print general purpose registers rax, rbx, ..., r14, r15.
-        auto const printGp([&]() {
-            char const * const currFmt("%s = 0x%016lx    %s = 0x%016lx    "
-                "%s = 0x%016lx    %s = 0x%016lx");
-            char const * const histFmt("      0x%016lx          0x%016lx     "
-                "     0x%016lx          0x%016lx");
-
-            ImGui::Text(currFmt,
-                        "rax", m_state.registers().rax,
-                        "rbx", m_state.registers().rbx,
-                        "rcx", m_state.registers().rcx,
-                        "rdx", m_state.registers().rdx);
-            ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-            ImGui::Text(histFmt,
-                        m_state.prevRegisters().rax,
-                        m_state.prevRegisters().rbx,
-                        m_state.prevRegisters().rcx,
-                        m_state.prevRegisters().rdx);
-            ImGui::PopStyleColor();
-            ImGui::Text("");
-
-            ImGui::Text(currFmt,
-                        "rsi", m_state.registers().rsi,
-                        "rdi", m_state.registers().rdi,
-                        "rsp", m_state.registers().rsp,
-                        "rbp", m_state.registers().rbp);
-            ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-            ImGui::Text(histFmt,
-                        m_state.prevRegisters().rsi,
-                        m_state.prevRegisters().rdi,
-                        m_state.prevRegisters().rsp,
-                        m_state.prevRegisters().rbp);
-            ImGui::PopStyleColor();
-            ImGui::Text("");
-
-            ImGui::Text(currFmt,
-                        "r8 ", m_state.registers().r8,
-                        "r9 ", m_state.registers().r9,
-                        "r10", m_state.registers().r10,
-                        "r11", m_state.registers().r11);
-            ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-            ImGui::Text(histFmt,
-                        m_state.prevRegisters().r8,
-                        m_state.prevRegisters().r9,
-                        m_state.prevRegisters().r10,
-                        m_state.prevRegisters().r11);
-            ImGui::PopStyleColor();
-            ImGui::Text("");
-
-            ImGui::Text(currFmt,
-                        "r12", m_state.registers().r12,
-                        "r13", m_state.registers().r13,
-                        "r14", m_state.registers().r14,
-                        "r15", m_state.registers().r15);
-            ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-            ImGui::Text(histFmt,
-                        m_state.prevRegisters().r12,
-                        m_state.prevRegisters().r13,
-                        m_state.prevRegisters().r14,
-                        m_state.prevRegisters().r15);
-            ImGui::PopStyleColor();
-            ImGui::Text("");
-        });
-
-        // Compute the string representation of rflags in the form:
-        //  "IOPL=x [A B C ...]"
-        // where A, B, C, ... are mnemonics for the different bits of
-        // RFLAGS.
-        // @param rflags: The value of RFLAGS to stringify.
-        // @return: The string representation of rflags.
-        auto const rflagsToString([](u64 const rflags) {
-            // Map 2 ** i to its associated mnemonic.
-            static std::map<u32, std::string> const mnemonics({
-                {(1 << 21), "ID"},
-                {(1 << 20), "VIP"},
-                {(1 << 19), "VIF"},
-                {(1 << 18), "AC"},
-                {(1 << 17), "VM"},
-                {(1 << 16), "RF"},
-                {(1 << 14), "NT"},
-                {(1 << 11), "OF"},
-                {(1 << 10), "DF"},
-                {(1 << 9), "IF"},
-                {(1 << 8), "TF"},
-                {(1 << 7), "SF"},
-                {(1 << 6), "ZF"},
-                {(1 << 4), "AF"},
-                {(1 << 2), "PF"},
-                {(1 << 0), "CF"},
-            });
-            u64 const iopl((rflags >> 12) & 0x3);
-            std::string res("IOPL=" + std::to_string(iopl) + " [");
-            bool hasFlag(false);
-            // The resulting string should be reverse-sorted on the mnemonics
-            // values, e.g. IF should appear before ZF and CF should always be
-            // the right-most (if set). The map keeps the mnemonics sorted on
-            // their value hence reverse-iterate here.
-            for (auto it(mnemonics.crbegin()); it != mnemonics.crend(); ++it) {
-                if ((rflags & it->first) == it->first) {
-                    if (hasFlag) {
-                        res += " ";
-                    } else {
-                        hasFlag = true;
-                    }
-                    res += it->second;
-                }
-            }
-            res += "]";
-            return res;
-        });
-        printGp();
-
-        ImGui::Text("rip = 0x%016lx    rfl = 0x%016lx %s",
-                    m_state.registers().rip,
-                    m_state.registers().rflags,
-                    rflagsToString(m_state.registers().rflags).c_str());
-        ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-        ImGui::Text("      0x%016lx          0x%016lx %s",
-                    m_state.prevRegisters().rip,
-                    m_state.prevRegisters().rflags,
-                    rflagsToString(m_state.prevRegisters().rflags).c_str());
-        ImGui::PopStyleColor();
-
-        ImGui::Separator();
-        ImGui::Text("  -- Segments --");
-        ImGui::Text("cs = 0x%04x  ds = 0x%04x  es = 0x%04x  fs = 0x%04x  "
-                    "gs = 0x%04x  ss = 0x%04x",
-                    m_state.registers().cs,
-                    m_state.registers().ds,
-                    m_state.registers().es,
-                    m_state.registers().fs,
-                    m_state.registers().gs,
-                    m_state.registers().ss);
-        ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-        ImGui::Text("     0x%04x       0x%04x       0x%04x       0x%04x       "
-                    "0x%04x       0x%04x",
-                    m_state.prevRegisters().cs,
-                    m_state.prevRegisters().ds,
-                    m_state.prevRegisters().es,
-                    m_state.prevRegisters().fs,
-                    m_state.prevRegisters().gs,
-                    m_state.prevRegisters().ss);
-        ImGui::PopStyleColor();
-
-        ImGui::Separator();
-        ImGui::Text("  -- Tables --");
-        ImGui::Text("idt: base = 0x%016lx  limit = 0x%08x    "
-                    "gdt: base = 0x%016lx  limit = 0x%08x",
-                    m_state.registers().idt.base,
-                    m_state.registers().idt.limit,
-                    m_state.registers().gdt.base,
-                    m_state.registers().gdt.limit);
-        ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-        ImGui::Text("            0x%016lx          0x%08x                "
-                    "0x%016lx          0x%08x",
-                    m_state.prevRegisters().idt.base,
-                    m_state.prevRegisters().idt.limit,
-                    m_state.prevRegisters().gdt.base,
-                    m_state.prevRegisters().gdt.limit);
-        ImGui::PopStyleColor();
-
-        ImGui::Separator();
-        ImGui::Text("  -- Control --");
-        ImGui::Text("cr0 = 0x%016lx    cr2 = 0x%016lx    cr3 = 0x%016lx",
-                    m_state.registers().cr0,
-                    m_state.registers().cr2,
-                    m_state.registers().cr3);
-        ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-        ImGui::Text("      0x%016lx          0x%016lx          0x%016lx",
-                    m_state.prevRegisters().cr0,
-                    m_state.prevRegisters().cr2,
-                    m_state.prevRegisters().cr3);
-        ImGui::PopStyleColor();
-        ImGui::Text("");
-        ImGui::Text("cr4 = 0x%016lx    cr8 = 0x%016lx   efer = 0x%016lx",
-                    m_state.registers().cr4,
-                    m_state.registers().cr8,
-                    m_state.registers().efer);
-        ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-        ImGui::Text("      0x%016lx          0x%016lx          0x%016lx",
-                    m_state.prevRegisters().cr4,
-                    m_state.prevRegisters().cr8,
-                    m_state.prevRegisters().efer);
-        ImGui::PopStyleColor();
-
-        // End general purpose registers.
-        ImGui::EndTabItem();
-    }
-
-    // Vector registers.
-    // Vector registers are printed out in tables, the following flags control
-    // the drawing of those tables.
-    ImGuiTableFlags const vecRegTableFlags(ImGuiTableFlags_ScrollX |
-                                           ImGuiTableFlags_ScrollY |
-                                           ImGuiTableFlags_BordersInnerV);
-    ImGuiTableColumnFlags const vecRegColFlags(
-        ImGuiTableColumnFlags_WidthFixed);
-
-    // FPU / MMX.
-    if (ImGui::BeginTabItem("FPU & MMX", NULL, 0)) {
-        // MMX registers only hold packed integers, hence override the current
-        // granularity if it is set to float or double.
-        VectorRegisterGranularity const granularity(
-            (m_currentGranularity == VectorRegisterGranularity::Float ||
-             m_currentGranularity == VectorRegisterGranularity::Double) ?
-                VectorRegisterGranularity::Qword :
-                m_currentGranularity);
-
-        u32 const numElemForGran(vec64::bytes /
-            granularityToBytes.at(granularity));
-        // One column for the register name, one for each element in the current
-        // granularity.
-        u32 const numCols(1 + numElemForGran);
-
-        if (ImGui::BeginTable("MMX", numCols, vecRegTableFlags)) {
-            // Name column.
-            ImGui::TableSetupScrollFreeze(1, 1);
-            ImGui::TableSetupColumn("Reg.", vecRegColFlags);
-            // Element column, named after the index of each element in the
-            // vector.
-            for (u32 i(0); i < numCols - 1; ++i) {
-                ImGui::TableSetupColumn(std::to_string((numCols-2) - i).c_str(),
-                                        vecRegColFlags);
-            }
-            ImGui::TableHeadersRow();
-
-            for (u8 i(0); i < X86Lab::Vm::State::Registers::NumMmxRegs; ++i) {
-                ImGui::TableNextColumn();
-                ImGui::Text("%s", ("mmx" + std::to_string(i)).c_str());
-                drawColsForVec(m_state.registers().mmx[i], granularity);
-                ImGui::TableNextColumn();
-                ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-                drawColsForVec(m_state.prevRegisters().mmx[i], granularity);
-                ImGui::PopStyleColor();
-            }
-            ImGui::EndTable();
-        }
-
-        ImGui::EndTabItem();
-    }
-
-    // SSE / AVX.
-    if (ImGui::BeginTabItem("SSE & AVX", NULL, 0)) {
-        // If AVX-512 is available, print the zmm registers, otherwise only
-        // print ymms registers.
-        u32 const bytePerVec(Util::Extension::hasAvx512() ?
-                             vec512::bytes : vec256::bytes);
-        VectorRegisterGranularity const granularity(m_currentGranularity);
-        u32 const numElemForGran(bytePerVec /
-            granularityToBytes.at(granularity));
-        u32 const numCols(1 + numElemForGran);
-
-        if (ImGui::BeginTable("SSE/AVX", numCols, vecRegTableFlags)) {
-            // Set up column names: regs 8 7 6 ... 0
-            ImGui::TableSetupScrollFreeze(1, 1);
-            ImGui::TableSetupColumn("Reg.", vecRegColFlags);
-            for (u32 i(0); i < numCols - 1; ++i) {
-                ImGui::TableSetupColumn(std::to_string((numCols-2) - i).c_str(),
-                                        vecRegColFlags);
-            }
-            ImGui::TableHeadersRow();
-
-            u32 const numRegs(Util::Extension::hasAvx512() ?
-                              X86Lab::Vm::State::Registers::NumZmmRegs :
-                              X86Lab::Vm::State::Registers::NumYmmRegs);
-            char const * const name(Util::Extension::hasAvx512()?"zmm":"ymm");
-            for (u8 i(0); i < numRegs; ++i) {
-                // Register name.
-                ImGui::TableNextColumn();
-                ImGui::Text("%s", (name + std::to_string(i)).c_str());
-                if (Util::Extension::hasAvx512()) {
-                    drawColsForVec(m_state.registers().zmm[i], granularity);
-                } else {
-                    drawColsForVec(m_state.registers().ymm[i], granularity);
-                }
-                ImGui::TableNextColumn();
-                ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-                if (Util::Extension::hasAvx512()) {
-                    drawColsForVec(m_state.prevRegisters().zmm[i], granularity);
-                } else {
-                    drawColsForVec(m_state.prevRegisters().ymm[i], granularity);
-                }
-                ImGui::PopStyleColor();
-            }
-            ImGui::EndTable();
-        }
-        ImGui::EndTabItem();
-    }
-    ImGui::EndTabBar();
-    ImGui::End();
-}
-
-void Imgui::updateStackWinStackFrameStartOffsets() {
-    m_stackWinStackFrameStartOffsets.clear();
+void Imgui::StackWindow::updateStackFrameStartOffsets(State const& state) {
+    m_stackFrameStartOffsets.clear();
     // Find all offsets corresponding to the start of stack frames by reading
     // the stack and all saved RBPs. In the worst case scenario we would need to
-    // find the last stackWinMaxHistory stack frames, any older frame would not
-    // show up in the stack window anyway, hence skipping. This puts a bound on
-    // the number of lookups however we still have the problem that we cannot
+    // find the last maxHistory stack frames, any older frame would not show up
+    // in the stack window anyway, hence skipping. This puts a bound on the
+    // number of lookups however we still have the problem that we cannot
     // reliably determine what is a stack frame and what isn't: maybe the
     // application/function is not creating stack frames in a "standard" fashion
     // (e.g. good old `push  rbp ; mov rbp, rsp`)? So we might read some garbage
@@ -576,183 +240,520 @@ void Imgui::updateStackWinStackFrameStartOffsets() {
     // except in some very peculiar situation (for instance if there is a wrap
     // around when pushing on the stack); this should be sufficient for 99.99%
     // of the cases.
-    u64 const rbp(m_state.registers().rbp);
-    u64 const rsp(m_state.registers().rsp);
+    u64 const rbp(state.registers().rbp);
+    u64 const rsp(state.registers().rsp);
     u64 currFrameStartOffset(rbp);
     while (rsp <= currFrameStartOffset &&
-           m_stackWinStackFrameStartOffsets.size() <= stackWinMaxHistory) {
-        m_stackWinStackFrameStartOffsets.insert(currFrameStartOffset);
+           m_stackFrameStartOffsets.size() <= maxHistory) {
+        m_stackFrameStartOffsets.insert(currFrameStartOffset);
 
         // Move to next stack frame, follow the saved RBP "linked
         // list".
         currFrameStartOffset = *reinterpret_cast<u64*>(
-            m_state.snapshot()->readPhysicalMemory(
+            state.snapshot()->readPhysicalMemory(
                 currFrameStartOffset, 8).get());
     }
 }
 
-void Imgui::drawStackWin(ImGuiViewport const& viewport) {
-    ImVec2 const pos(stackWinPos.x * viewport.WorkSize.x,
-                     stackWinPos.y * viewport.WorkSize.y);
-    ImGui::SetNextWindowPos(pos);
 
-    // Force auto-fit for the window's size.
-    ImGui::SetNextWindowSize(ImVec2(0, 0));
+void Imgui::StackWindow::doDraw(State const& state) {
+    if (m_previousRsp != state.registers().rsp ||
+        m_previousRbp != state.registers().rbp) {
+        // Re-compute the cached stack frame start offsets now that the state
+        // of the stack. The condition is a bit sloppy here, we might end up
+        // recomputing more than necessary, but as long as we are not missing a
+        // recomputation when one is needed we are fine.
+        // We _could_ keep track of the frame creation / deletion but this would
+        // be error prone especially when dealing with reverse execution.
+        updateStackFrameStartOffsets(state);
+    }
 
-    // Set the constraints on the stack window. We want the window to be at
-    // least as tall as the code window. The width is un-constrained, we let the
-    // window be automatically sized by its content.
-    ImVec2 const minSize(0.0f, codeWinSize.y * viewport.WorkSize.y);
-    ImVec2 const maxSize(viewport.WorkSize.x,
-                         codeWinSize.y * viewport.WorkSize.y);
-    ImGui::SetNextWindowSizeConstraints(minSize, maxSize);
-
-    ImGuiWindowFlags const winFlags(defaultWindowFlags |
-                                    ImGuiWindowFlags_NoScrollbar |
-                                    ImGuiWindowFlags_NoScrollWithMouse);
-    ImGui::Begin("Stack", NULL, winFlags);
-
+    // There seems to be a bug in Dear ImGui where not setting ScrollX when
+    // setting ScrollY on a table leads to the scroll bar overlapping with the
+    // content of the table, but only when the scroll bar is towards the bottom
+    // of the table.
     ImGuiTableFlags const tableFlags(ImGuiTableFlags_ScrollY |
+                                     ImGuiTableFlags_ScrollX |
                                      ImGuiTableFlags_SizingFixedFit |
                                      ImGuiTableFlags_BordersInnerV);
+    // Specifying ScrollX/Y requires specifying the outerSize. We can leave the
+    // x to 0 so that the table is auto-sized on the horizontal axis.
+    // The height is set to the entire window.
+    ImVec2 const outerSize(0.0f, ImGui::GetContentRegionAvail().y);
+    if (!ImGui::BeginTable("StackTable", 3, tableFlags, outerSize)) {
+        return;
+    }
+
+    ImGui::TableSetupScrollFreeze(0, 1);
     ImGuiTableColumnFlags const colFlags(ImGuiTableColumnFlags_WidthFixed);
-    if (ImGui::BeginTable("StackTable", 3, tableFlags)) {
-        ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("Address", colFlags);
-        ImGui::TableSetupColumn("Rel.", colFlags);
-        ImGui::TableSetupColumn("Value", colFlags);
-        ImGui::TableHeadersRow();
+    ImGui::TableSetupColumn("Address", colFlags);
+    ImGui::TableSetupColumn("Rel.", colFlags);
+    ImGui::TableSetupColumn("Value", colFlags);
+    ImGui::TableHeadersRow();
 
-        u64 const rsp(m_state.registers().rsp);
+    u64 const rsp(state.registers().rsp);
 
-        // Draw a separator at the top of the current row. This is done
-        // everytime the start of a stack frame is detected.
-        auto const showSeparatorOnCurrentRow([&]() {
-            ImVec2 const cursorPos(ImGui::GetCursorScreenPos());
-            ImVec2 const padding(ImGui::GetStyle().CellPadding);
-            // Separator spans the entire width of the row, honoring padding.
-            float const sepLen(ImGui::GetWindowContentRegionMax().x);
-            ImVec2 const start(cursorPos.x, cursorPos.y - padding.y);
-            ImVec2 const end(start.x + sepLen, start.y);
-            ImDrawList* const drawList(ImGui::GetWindowDrawList());
-            u32 const color(ImGui::GetColorU32(stackWinFrameSeparatorColor));
-            drawList->AddLine(start, end, color,
-                              stackWinFrameSeparatorThickness);
-        });
+    // Draw a separator at the top of the current row. This is done everytime
+    // the start of a stack frame is detected.
+    auto const showSeparatorOnCurrentRow([&]() {
+        ImVec2 const cursorPos(ImGui::GetCursorScreenPos());
+        ImVec2 const padding(ImGui::GetStyle().CellPadding);
+        // Separator spans the entire width of the row, honoring padding.
+        float const sepLen(ImGui::GetWindowContentRegionMax().x);
+        ImVec2 const start(cursorPos.x, cursorPos.y - padding.y);
+        ImVec2 const end(start.x + sepLen, start.y);
+        ImDrawList* const drawList(ImGui::GetWindowDrawList());
+        u32 const color(ImGui::GetColorU32(frameSeparatorColor));
+        drawList->AddLine(start, end, color, frameSeparatorThickness);
+    });
 
-        // Compute the memory offset associated with a particular row given its
-        // id. Row with id 0 shows the oldest entry in the stack (e.g. the
-        // furthest away from current rsp).
-        // The row with max id (this id depends on the size) shows the latest
-        // entry in the stack, e.g. value pointed by rsp.
-        // @param rowId: The index of the row.
-        // @return: 64-bit offset associated with this row.
-        auto const rowIdToOffset([&](u32 const rowId) {
-            return rsp + (stackWinMaxHistory - rowId - 1) * 8;
-        });
+    // Compute the memory offset associated with a particular row given its id.
+    // Row with id 0 shows the oldest entry in the stack (e.g. the furthest away
+    // from current rsp).
+    // The row with max id (this id depends on the size) shows the latest entry
+    // in the stack, e.g. value pointed by rsp.
+    // @param rowId: The index of the row.
+    // @return: 64-bit offset associated with this row.
+    auto const rowIdToOffset([&](u32 const rowId) {
+        return rsp + (maxHistory - rowId - 1) * 8;
+    });
 
-        // Check if the row with id `rowId` has an offset which coincides with
-        // the start of a stack frame. More specifically this checks of
-        // rowIdToOffset(rowId) is the beginning of any stack frame in the
-        // stack.
-        // @param rowId: The id of the row to test.
-        // @return: true if the row is the start of a frame, false otherwise.
-        auto const isRowStartOfStackFrame([&](u32 const rowId) {
-            u64 const rowOffset(rowIdToOffset(rowId));
-            return m_stackWinStackFrameStartOffsets.contains(rowOffset);
-        });
+    // Check if the row with id `rowId` has an offset which coincides with the
+    // start of a stack frame. More specifically this checks of
+    // rowIdToOffset(rowId) is the beginning of any stack frame in the stack.
+    // @param rowId: The id of the row to test.
+    // @return: true if the row is the start of a frame, false otherwise.
+    auto const isRowStartOfStackFrame([&](u32 const rowId) {
+        u64 const rowOffset(rowIdToOffset(rowId));
+        return m_stackFrameStartOffsets.contains(rowOffset);
+    });
 
-        // Print a row of the table showing the stack's content.
-        // @param rowId: The index of the row in the table.
-        auto const printRow([&](u32 const rowId) {
-            u64 const currOffset(rowIdToOffset(rowId));
+    // Print a row of the table showing the stack's content.
+    // @param rowId: The index of the row in the table.
+    auto const printRow([&](u32 const rowId) {
+        u64 const currOffset(rowIdToOffset(rowId));
 
-            std::unique_ptr<u8> const raw(
-                m_state.snapshot()->readPhysicalMemory(currOffset, 8));
-            u64 const val(*reinterpret_cast<u64*>(raw.get()));
+        std::unique_ptr<u8> const raw(
+            state.snapshot()->readPhysicalMemory(currOffset, 8));
+        u64 const val(*reinterpret_cast<u64*>(raw.get()));
 
-            // Start new row.
-            ImGui::TableNextColumn();
-            if (isRowStartOfStackFrame(rowId)) {
-                // Add a separator at the start of each stack frame.
-                showSeparatorOnCurrentRow();
-            }
-
-            // Address column.
-            ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-            ImGui::Text("0x%016lx", currOffset);
-            ImGui::PopStyleColor();
-
-            // Relative offset from rsp column.
-            ImGui::TableNextColumn();
-            if (currOffset == rsp) {
-                ImGui::Text("     rsp ->");
-                ImGui::SetScrollHereY();
-            } else {
-                u64 const relativeOffset(currOffset - rsp);
-                ImGui::Text("rsp + 0x%03lx", relativeOffset);
-            }
-
-            // Value column.
-            ImGui::TableNextColumn();
-            ImGui::Text("0x%016lx", val);
-        });
-
-        ImGuiListClipper clipper;
-        clipper.Begin(stackWinMaxHistory);
-        while (clipper.Step()) {
-            for (int i(clipper.DisplayStart); i < clipper.DisplayEnd; ++i) {
-                printRow(i);
-            }
+        // Start new row.
+        ImGui::TableNextColumn();
+        if (isRowStartOfStackFrame(rowId)) {
+            // Add a separator at the start of each stack frame.
+            showSeparatorOnCurrentRow();
         }
 
-        if (m_isDrawingNewState) {
-            // Reset the scroll to show the current RSP after each step.
-            ImGui::SetScrollY(ImGui::GetScrollMaxY());
+        // Address column.
+        ImGui::PushStyleColor(ImGuiCol_Text, addrColor);
+        ImGui::Text("0x%016lx", currOffset);
+        ImGui::PopStyleColor();
+
+        // Relative offset from rsp column.
+        ImGui::TableNextColumn();
+        if (currOffset == rsp) {
+            ImGui::Text("     rsp ->");
+        } else {
+            u64 const relativeOffset(currOffset - rsp);
+            ImGui::Text("rsp + 0x%04lx", relativeOffset);
         }
-        ImGui::EndTable();
+
+        // Value column.
+        ImGui::TableNextColumn();
+        ImGui::Text("0x%016lx", val);
+    });
+
+    ImGuiListClipper clipper;
+    clipper.Begin(maxHistory);
+    while (clipper.Step()) {
+        for (int i(clipper.DisplayStart); i < clipper.DisplayEnd; ++i) {
+            printRow(i);
+        }
     }
 
-    // Save the stack window's size to compute the position and size of the
-    // register window.
-    m_stackWinSize = ImGui::GetWindowSize();
-    ImGui::End();
-}
-
-void Imgui::drawLogsWin(ImGuiViewport const& viewport) {
-    ImVec2 const pos(logsWinPos.x * viewport.WorkSize.x,
-                     logsWinPos.y * viewport.WorkSize.y);
-    ImVec2 const size(logsWinSize.x * viewport.WorkSize.x,
-                      logsWinSize.y * viewport.WorkSize.y);
-
-    ImGui::SetNextWindowPos(pos);
-    ImGui::SetNextWindowSize(size);
-
-    ImGui::Begin("Logs", NULL, defaultWindowFlags);
-    for (std::string& log : m_logs) {
-        ImGui::Text("%s", log.c_str());
+    // Reset the scroll to show the current RSP after each push / pop.
+    if (m_previousRsp != state.registers().rsp) {
+        ImGui::SetScrollY(ImGui::GetScrollMaxY());
     }
-    // Keep the scroll at the bottom of the box.
-    ImGui::SetScrollHereY(1.0f);
-    ImGui::End();
+
+    ImGui::EndTable();
+
+    m_previousRsp = state.registers().rsp;
+    m_previousRbp = state.registers().rbp;
 }
 
-void Imgui::drawMemWin(ImGuiViewport const& viewport) {
-    ImVec2 const pos(memWinPos.x * viewport.WorkSize.x,
-                     memWinPos.y * viewport.WorkSize.y);
-    ImVec2 const size(memWinSize.x * viewport.WorkSize.x,
-                      memWinSize.y * viewport.WorkSize.y);
+Imgui::RegisterWindow::RegisterWindow() :
+    Window(defaultTitle, Imgui::defaultWindowFlags),
+    m_currentGranularity(Granularity::Qword) {}
 
-    ImGui::SetNextWindowPos(pos);
-    ImGui::SetNextWindowSize(size);
+// Compute the next value of an enum, wrapping around to the first value of the
+// enumeration if needed. This assume that the type of the enum (E) contains a
+// value called "__MAX" which appears last in the enum's declaration.
+// @param e: The value for which the next value should be computed.
+// @return: The value appearing after `e` in E's declaration, if this is "__MAX"
+// then this returns the first declared value in E.
+template<typename E>
+static E next(E const e) {
+    int const curr(static_cast<int>(e));
+    int const max(static_cast<int>(E::__MAX));
+    return static_cast<E>((curr + 1) % max);
+}
 
-    ImGuiWindowFlags const winFlags(defaultWindowFlags |
-                                    ImGuiWindowFlags_HorizontalScrollbar |
-                                    ImGuiWindowFlags_NoScrollbar |
-                                    ImGuiWindowFlags_NoScrollWithMouse);
+void Imgui::RegisterWindow::nextGranularity() {
+    m_currentGranularity = next(m_currentGranularity);
+}
 
-    ImGui::Begin("Physical Memory", NULL, winFlags);
+std::map<Imgui::RegisterWindow::Granularity, u32> const
+    Imgui::RegisterWindow::granularityToBytes = {
+    {Imgui::RegisterWindow::Granularity::Byte,   1},
+    {Imgui::RegisterWindow::Granularity::Word,   2},
+    {Imgui::RegisterWindow::Granularity::Dword,  4},
+    {Imgui::RegisterWindow::Granularity::Qword,  8},
+    {Imgui::RegisterWindow::Granularity::Float,  4},
+    {Imgui::RegisterWindow::Granularity::Double, 8},
+};
 
+template<size_t W>
+void Imgui::RegisterWindow::drawColsForVec(vec<W> const& vec,
+                                           Granularity const granularity) {
+    u32 const numElems(vec.bytes / granularityToBytes.at(granularity));
+    for (int i(numElems - 1); i >= 0; --i) {
+        ImGui::TableNextColumn();
+        switch (granularity) {
+            case Granularity::Byte:
+                ImGui::Text("%02hhx", vec.template elem<u8>(i));
+                break;
+            case Granularity::Word:
+                ImGui::Text("%04hx", vec.template elem<u16>(i));
+                break;
+            case Granularity::Dword:
+                ImGui::Text("%08x", vec.template elem<u32>(i));
+                break;
+            case Granularity::Qword:
+                ImGui::Text("%016lx", vec.template elem<u64>(i));
+                break;
+            case Granularity::Float:
+                ImGui::Text("%f", vec.template elem<float>(i));
+                break;
+            case Granularity::Double:
+                ImGui::Text("%f", vec.template elem<double>(i));
+                break;
+            default:
+                throw std::runtime_error("Invalid granularity");
+        }
+    }
+}
+
+void Imgui::RegisterWindow::doDraw(State const& state) {
+    ImGui::BeginTabBar("##tabs", 0);
+
+    if (ImGui::BeginTabItem("General Purpose", NULL, 0)) {
+        doDrawGeneralPurpose(state);
+        ImGui::EndTabItem();
+    }
+
+    if (ImGui::BeginTabItem("FPU & MMX", NULL, 0)) {
+        doDrawFpuMmx(state);
+        ImGui::EndTabItem();
+    }
+
+    if (ImGui::BeginTabItem("SSE & AVX", NULL, 0)) {
+        doDrawSseAvx(state);
+        ImGui::EndTabItem();
+    }
+
+    ImGui::EndTabBar();
+}
+
+void Imgui::RegisterWindow::doDrawGeneralPurpose(State const& state) {
+    ImGui::Text("  -- General Purpose --");
+    // Print general purpose registers rax, rbx, ..., r14, r15.
+    auto const printGp([&]() {
+        char const * const currFmt("%s = 0x%016lx    %s = 0x%016lx    "
+            "%s = 0x%016lx    %s = 0x%016lx");
+        char const * const histFmt("      0x%016lx          0x%016lx     "
+            "     0x%016lx          0x%016lx");
+
+        ImGui::Text(currFmt,
+                    "rax", state.registers().rax,
+                    "rbx", state.registers().rbx,
+                    "rcx", state.registers().rcx,
+                    "rdx", state.registers().rdx);
+        ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
+        ImGui::Text(histFmt,
+                    state.prevRegisters().rax, state.prevRegisters().rbx,
+                    state.prevRegisters().rcx,
+                    state.prevRegisters().rdx);
+        ImGui::PopStyleColor();
+        ImGui::Text("");
+
+        ImGui::Text(currFmt,
+                    "rsi", state.registers().rsi,
+                    "rdi", state.registers().rdi,
+                    "rsp", state.registers().rsp,
+                    "rbp", state.registers().rbp);
+        ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
+        ImGui::Text(histFmt,
+                    state.prevRegisters().rsi,
+                    state.prevRegisters().rdi,
+                    state.prevRegisters().rsp,
+                    state.prevRegisters().rbp);
+        ImGui::PopStyleColor();
+        ImGui::Text("");
+
+        ImGui::Text(currFmt,
+                    "r8 ", state.registers().r8,
+                    "r9 ", state.registers().r9,
+                    "r10", state.registers().r10,
+                    "r11", state.registers().r11);
+        ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
+        ImGui::Text(histFmt,
+                    state.prevRegisters().r8,
+                    state.prevRegisters().r9,
+                    state.prevRegisters().r10,
+                    state.prevRegisters().r11);
+        ImGui::PopStyleColor();
+        ImGui::Text("");
+
+        ImGui::Text(currFmt,
+                    "r12", state.registers().r12,
+                    "r13", state.registers().r13,
+                    "r14", state.registers().r14,
+                    "r15", state.registers().r15);
+        ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
+        ImGui::Text(histFmt,
+                    state.prevRegisters().r12,
+                    state.prevRegisters().r13,
+                    state.prevRegisters().r14,
+                    state.prevRegisters().r15);
+        ImGui::PopStyleColor();
+        ImGui::Text("");
+    });
+
+    // Compute the string representation of rflags in the form:
+    //  "IOPL=x [A B C ...]"
+    // where A, B, C, ... are mnemonics for the different bits of
+    // RFLAGS.
+    // @param rflags: The value of RFLAGS to stringify.
+    // @return: The string representation of rflags.
+    auto const rflagsToString([](u64 const rflags) {
+        // Map 2 ** i to its associated mnemonic.
+        static std::map<u32, std::string> const mnemonics({
+            {(1 << 21), "ID"},
+            {(1 << 20), "VIP"},
+            {(1 << 19), "VIF"},
+            {(1 << 18), "AC"},
+            {(1 << 17), "VM"},
+            {(1 << 16), "RF"},
+            {(1 << 14), "NT"},
+            {(1 << 11), "OF"},
+            {(1 << 10), "DF"},
+            {(1 << 9), "IF"},
+            {(1 << 8), "TF"},
+            {(1 << 7), "SF"},
+            {(1 << 6), "ZF"},
+            {(1 << 4), "AF"},
+            {(1 << 2), "PF"},
+            {(1 << 0), "CF"},
+        });
+        u64 const iopl((rflags >> 12) & 0x3);
+        std::string res("IOPL=" + std::to_string(iopl) + " [");
+        bool hasFlag(false);
+        // The resulting string should be reverse-sorted on the mnemonics
+        // values, e.g. IF should appear before ZF and CF should always be the
+        // right-most (if set). The map keeps the mnemonics sorted on their
+        // value hence reverse-iterate here.
+        for (auto it(mnemonics.crbegin()); it != mnemonics.crend(); ++it) {
+            if ((rflags & it->first) == it->first) {
+                if (hasFlag) {
+                    res += " ";
+                } else {
+                    hasFlag = true;
+                }
+                res += it->second;
+            }
+        }
+        res += "]";
+        return res;
+    });
+    printGp();
+
+    ImGui::Text("rip = 0x%016lx    rfl = 0x%016lx %s",
+                state.registers().rip,
+                state.registers().rflags,
+                rflagsToString(state.registers().rflags).c_str());
+    ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
+    ImGui::Text("      0x%016lx          0x%016lx %s",
+                state.prevRegisters().rip,
+                state.prevRegisters().rflags,
+                rflagsToString(state.prevRegisters().rflags).c_str());
+    ImGui::PopStyleColor();
+
+    ImGui::Separator();
+    ImGui::Text("  -- Segments --");
+    ImGui::Text("cs = 0x%04x  ds = 0x%04x  es = 0x%04x  fs = 0x%04x  "
+                "gs = 0x%04x  ss = 0x%04x",
+                state.registers().cs,
+                state.registers().ds,
+                state.registers().es,
+                state.registers().fs,
+                state.registers().gs,
+                state.registers().ss);
+    ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
+    ImGui::Text("     0x%04x       0x%04x       0x%04x       0x%04x       "
+                "0x%04x       0x%04x",
+                state.prevRegisters().cs,
+                state.prevRegisters().ds,
+                state.prevRegisters().es,
+                state.prevRegisters().fs,
+                state.prevRegisters().gs,
+                state.prevRegisters().ss);
+    ImGui::PopStyleColor();
+
+    ImGui::Separator();
+    ImGui::Text("  -- Tables --");
+    ImGui::Text("idt: base = 0x%016lx  limit = 0x%08x    "
+                "gdt: base = 0x%016lx  limit = 0x%08x",
+                state.registers().idt.base,
+                state.registers().idt.limit,
+                state.registers().gdt.base,
+                state.registers().gdt.limit);
+    ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
+    ImGui::Text("            0x%016lx          0x%08x                "
+                "0x%016lx          0x%08x",
+                state.prevRegisters().idt.base,
+                state.prevRegisters().idt.limit,
+                state.prevRegisters().gdt.base,
+                state.prevRegisters().gdt.limit);
+    ImGui::PopStyleColor();
+
+    ImGui::Separator();
+    ImGui::Text("  -- Control --");
+    ImGui::Text("cr0 = 0x%016lx    cr2 = 0x%016lx    cr3 = 0x%016lx",
+                state.registers().cr0,
+                state.registers().cr2,
+                state.registers().cr3);
+    ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
+    ImGui::Text("      0x%016lx          0x%016lx          0x%016lx",
+                state.prevRegisters().cr0,
+                state.prevRegisters().cr2,
+                state.prevRegisters().cr3);
+    ImGui::PopStyleColor();
+    ImGui::Text("");
+    ImGui::Text("cr4 = 0x%016lx    cr8 = 0x%016lx   efer = 0x%016lx",
+                state.registers().cr4,
+                state.registers().cr8,
+                state.registers().efer);
+    ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
+    ImGui::Text("      0x%016lx          0x%016lx          0x%016lx",
+                state.prevRegisters().cr4,
+                state.prevRegisters().cr8,
+                state.prevRegisters().efer);
+    ImGui::PopStyleColor();
+}
+
+void Imgui::RegisterWindow::doDrawFpuMmx(State const& state) {
+    // MMX registers only hold packed integers, hence override the current
+    // granularity if it is set to float or double.
+    Granularity const granularity(
+        (m_currentGranularity == Granularity::Float ||
+         m_currentGranularity == Granularity::Double) ?
+            Granularity::Qword :
+            m_currentGranularity);
+
+    u32 const numElemForGran(vec64::bytes / granularityToBytes.at(granularity));
+    // One column for the register name, one for each element in the current
+    // granularity.
+    u32 const numCols(1 + numElemForGran);
+
+    ImGuiTableFlags const tableFlags(ImGuiTableFlags_ScrollX |
+                                     ImGuiTableFlags_ScrollY |
+                                     ImGuiTableFlags_BordersInnerV);
+    ImGuiTableColumnFlags const colFlags(ImGuiTableColumnFlags_WidthFixed);
+
+    if (!ImGui::BeginTable("MMX", numCols, tableFlags)) {
+        return;
+    }
+
+    // Name column.
+    ImGui::TableSetupScrollFreeze(1, 1);
+    ImGui::TableSetupColumn("Reg.", colFlags);
+    // Element column, named after the index of each element in the vector.
+    for (u32 i(0); i < numCols - 1; ++i) {
+        ImGui::TableSetupColumn(std::to_string((numCols-2) - i).c_str(),
+                                colFlags);
+    }
+    ImGui::TableHeadersRow();
+
+    for (u8 i(0); i < X86Lab::Vm::State::Registers::NumMmxRegs; ++i) {
+        ImGui::TableNextColumn();
+        ImGui::Text("%s", ("mmx" + std::to_string(i)).c_str());
+        drawColsForVec(state.registers().mmx[i], granularity);
+        ImGui::TableNextColumn();
+        ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
+        drawColsForVec(state.prevRegisters().mmx[i], granularity);
+        ImGui::PopStyleColor();
+    }
+    ImGui::EndTable();
+}
+
+void Imgui::RegisterWindow::doDrawSseAvx(State const& state) {
+    // If AVX-512 is available, print the zmm registers, otherwise only
+    // print ymms registers.
+    u32 const bytePerVec(Util::Extension::hasAvx512() ?
+                         vec512::bytes : vec256::bytes);
+    Granularity const granularity(m_currentGranularity);
+    u32 const numElemForGran(bytePerVec / granularityToBytes.at(granularity));
+    u32 const numCols(1 + numElemForGran);
+
+    ImGuiTableFlags const tableFlags(ImGuiTableFlags_ScrollX |
+                                     ImGuiTableFlags_ScrollY |
+                                     ImGuiTableFlags_BordersInnerV);
+    ImGuiTableColumnFlags const colFlags(ImGuiTableColumnFlags_WidthFixed);
+
+    if (!ImGui::BeginTable("SSE/AVX", numCols, tableFlags)) {
+        return;
+    }
+
+    // Set up column names: regs 8 7 6 ... 0
+    ImGui::TableSetupScrollFreeze(1, 1);
+    ImGui::TableSetupColumn("Reg.", colFlags);
+    for (u32 i(0); i < numCols - 1; ++i) {
+        ImGui::TableSetupColumn(std::to_string((numCols-2) - i).c_str(),
+                                colFlags);
+    }
+    ImGui::TableHeadersRow();
+
+    u32 const numRegs(Util::Extension::hasAvx512() ?
+                      X86Lab::Vm::State::Registers::NumZmmRegs :
+                      X86Lab::Vm::State::Registers::NumYmmRegs);
+    char const * const name(Util::Extension::hasAvx512()?"zmm":"ymm");
+    for (u8 i(0); i < numRegs; ++i) {
+        // Register name.
+        ImGui::TableNextColumn();
+        ImGui::Text("%s", (name + std::to_string(i)).c_str());
+        if (Util::Extension::hasAvx512()) {
+            drawColsForVec(state.registers().zmm[i], granularity);
+        } else {
+            drawColsForVec(state.registers().ymm[i], granularity);
+        }
+        ImGui::TableNextColumn();
+        ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
+        if (Util::Extension::hasAvx512()) {
+            drawColsForVec(state.prevRegisters().zmm[i], granularity);
+        } else {
+            drawColsForVec(state.prevRegisters().ymm[i], granularity);
+        }
+        ImGui::PopStyleColor();
+    }
+    ImGui::EndTable();
+}
+
+Imgui::MemoryWindow::MemoryWindow() :
+    Window(defaultTitle, windowFlags),
+    m_focusedAddr(0) {}
+
+void Imgui::MemoryWindow::doDraw(State const& state) {
     // FIXME: All of the code below is really hard-coded for showing 8 QWORDs
     // per row. There should be a way to dynamically change this from the IU,
     // e.g. show WORDs, DWORDs, floats, ... instead.
@@ -771,7 +772,7 @@ void Imgui::drawMemWin(ImGuiViewport const& viewport) {
     // Print legend, AlignTextToFramePadding makes sure the text will be
     // centered with the input text.
     ImGui::AlignTextToFramePadding();
-    ImGui::Text(memWinInputFieldText);
+    ImGui::Text(inputFieldText);
     ImGui::SameLine();
 
     // Where the input address will be stored, need enough space to input a
@@ -795,11 +796,11 @@ void Imgui::drawMemWin(ImGuiViewport const& viewport) {
             iss >> std::hex >> input;
 
             // Keep the memory dump aligned on bytesPerLine.
-            m_memWinFocusedAddr = bytesPerLine * (input / bytesPerLine);
+            m_focusedAddr = bytesPerLine * (input / bytesPerLine);
         } else {
             // Buffer might be empty after erasing the content of the input
             // field, in this case reset to focusing on 0.
-            m_memWinFocusedAddr = 0;
+            m_focusedAddr = 0;
         }
     }
 
@@ -824,126 +825,123 @@ void Imgui::drawMemWin(ImGuiViewport const& viewport) {
     ImVec2 const outerSize(0.0f, tableHeight);
     ImVec2 const tablePos(ImGui::GetCursorScreenPos());
 
-    if (ImGui::BeginTable("MemoryDump", 10, tableFlags, outerSize)) {
-        // The headers of the colums are always shown.
-        ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("Address", colFlags);
-        ImGui::TableSetupColumn("+0x00", colFlags);
-        ImGui::TableSetupColumn("+0x08", colFlags);
-        ImGui::TableSetupColumn("+0x10", colFlags);
-        ImGui::TableSetupColumn("+0x18", colFlags);
-        ImGui::TableSetupColumn("+0x20", colFlags);
-        ImGui::TableSetupColumn("+0x28", colFlags);
-        ImGui::TableSetupColumn("+0x30", colFlags);
-        ImGui::TableSetupColumn("+0x38", colFlags);
-        ImGui::TableSetupColumn("ASCII", colFlags);
-        ImGui::TableHeadersRow();
+    if (!ImGui::BeginTable("MemoryDump", 10, tableFlags, outerSize)) {
+        return;
+    }
 
-        if (focusedAddrChanged) {
-            // Immediately honor the requested focus address and change the
-            // scroll position so that that address is the first line in the
-            // dump. We need to do that _before_ drawing using the clipper so
-            // the clipper is computing the correct range (e.g. starting at
-            // focusedRowIdx).
-            u64 const focusedRowIdx(m_memWinFocusedAddr / bytesPerLine);
-            ImGui::SetScrollY(focusedRowIdx * rowHeight);
-        } else {
-            // Make sure the scroll position is at a multiple of rowHeight. Note
-            // that the if block above guarantees this when focusing on a
-            // particular address, hence not needed in that case.
-            float const scrollY(ImGui::GetScrollY());
-            ImGui::SetScrollY(std::floor(scrollY / rowHeight) * rowHeight);
-        }
+    // The headers of the colums are always shown.
+    ImGui::TableSetupScrollFreeze(0, 1);
+    ImGui::TableSetupColumn("Address", colFlags);
+    ImGui::TableSetupColumn("+0x00", colFlags);
+    ImGui::TableSetupColumn("+0x08", colFlags);
+    ImGui::TableSetupColumn("+0x10", colFlags);
+    ImGui::TableSetupColumn("+0x18", colFlags);
+    ImGui::TableSetupColumn("+0x20", colFlags);
+    ImGui::TableSetupColumn("+0x28", colFlags);
+    ImGui::TableSetupColumn("+0x30", colFlags);
+    ImGui::TableSetupColumn("+0x38", colFlags);
+    ImGui::TableSetupColumn("ASCII", colFlags);
+    ImGui::TableHeadersRow();
 
-        // Print a row in the table.
-        // @param rowIdx: The index of the row. The resulting row will be for
-        // offset = rowIdx * bytesPerLine.
-        auto const printRow([&](u32 const rowIdx) {
-            u64 const offset(rowIdx * bytesPerLine);
+    if (focusedAddrChanged) {
+        // Immediately honor the requested focus address and change the scroll
+        // position so that that address is the first line in the dump. We need
+        // to do that _before_ drawing using the clipper so the clipper is
+        // computing the correct range (e.g. starting at focusedRowIdx).
+        u64 const focusedRowIdx(m_focusedAddr / bytesPerLine);
+        ImGui::SetScrollY(focusedRowIdx * rowHeight);
+    } else {
+        // Make sure the scroll position is at a multiple of rowHeight. Note
+        // that the if block above guarantees this when focusing on a particular
+        // address, hence not needed in that case.
+        float const scrollY(ImGui::GetScrollY());
+        ImGui::SetScrollY(std::floor(scrollY / rowHeight) * rowHeight);
+    }
 
-            ImGui::TableNextRow();
+    // Print a row in the table.
+    // @param rowIdx: The index of the row. The resulting row will be for
+    // offset = rowIdx * bytesPerLine.
+    auto const printRow([&](u32 const rowIdx) {
+        u64 const offset(rowIdx * bytesPerLine);
+
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+
+        // Address.
+        ImGui::PushStyleColor(ImGuiCol_Text, addrColor);
+        ImGui::Text("0x%016lx", offset);
+        ImGui::PopStyleColor();
+
+
+        std::shared_ptr<X86Lab::Snapshot const> const s(state.snapshot());
+        vec512 const line(s->readPhysicalMemory(offset,
+                                                bytesPerLine).get());
+
+        // Elements at that offset.
+        for (u32 i(0); i < numElems; ++i) {
             ImGui::TableNextColumn();
-
-            // Address.
-            ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-            ImGui::Text("0x%016lx", offset);
-            ImGui::PopStyleColor();
-
-
-            std::shared_ptr<X86Lab::Snapshot const> const s(m_state.snapshot());
-            vec512 const line(s->readPhysicalMemory(offset,
-                                                    bytesPerLine).get());
-
-            // Elements at that offset.
-            for (u32 i(0); i < numElems; ++i) {
-                ImGui::TableNextColumn();
-                ImGui::Text("%016lx", line.elem<u64>(i));
-            }
-
-            // ASCII repr.
-            ImGui::TableNextColumn();
-            for (u32 i(0); i < bytesPerLine; ++i) {
-                // Replace non-printable char by a darkened "." char.
-                char const ch(line.elem<u8>(i));
-                if (std::isprint(ch)) {
-                    ImGui::Text("%c", ch);
-                } else {
-                    ImGui::PushStyleColor(ImGuiCol_Text, regsOldValColor);
-                    ImGui::Text(".");
-                    ImGui::PopStyleColor();
-                }
-                // Cancel-out the newline from the previous ImGui::Text(), next
-                // char is immediately following the previous one.
-                ImGui::SameLine(0, 0);
-            }
-        });
-
-        ImGuiListClipper clipper;
-        clipper.Begin(memWinDumpLines);
-        while (clipper.Step()) {
-            for (int i(clipper.DisplayStart); i < clipper.DisplayEnd; ++i) {
-                printRow(i);
-            }
+            ImGui::Text("%016lx", line.elem<u64>(i));
         }
 
-
-        ImGui::EndTable();
-
-        // Draw separators between the addresses and the content and between
-        // the content and the ASCII repr.
-        // Note: Dear ImGui does not support only drawing borders on _some_
-        // columns hence we are forced to use the DrawList API here.
-        ImDrawList* const drawList(ImGui::GetWindowDrawList());
-        float const paddingX(style.CellPadding.x);
-        float const paddingY(style.CellPadding.y);
-        float const addrColWidth(ImGui::CalcTextSize("0x0000000000000000").x +
-            paddingX);
-
-        // The separator spans all displayed rows of the table, excepted the
-        // first header row. Use some padding to make it pretty.
-        float const sepLen(tableHeight - rowHeight - 2 * paddingY);
-        // FIXME: Make this a static const in the Imgui class.
-        ImVec4 const sepColor(regsOldValColor);
-
-        // First separator.
-        {
-        ImVec2 const sepStart(tablePos.x + addrColWidth,
-                              tablePos.y + rowHeight + paddingY);
-        ImVec2 const sepEnd(sepStart.x, sepStart.y + sepLen);
-        drawList->AddLine(sepStart, sepEnd, ImGui::GetColorU32(sepColor));
+        // ASCII repr.
+        ImGui::TableNextColumn();
+        for (u32 i(0); i < bytesPerLine; ++i) {
+            // Replace non-printable char by a darkened "." char.
+            char const ch(line.elem<u8>(i));
+            if (std::isprint(ch)) {
+                ImGui::Text("%c", ch);
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Text, nonPrintColor);
+                ImGui::Text(".");
+                ImGui::PopStyleColor();
+            }
+            // Cancel-out the newline from the previous ImGui::Text(), next
+            // char is immediately following the previous one.
+            ImGui::SameLine(0, 0);
         }
+    });
 
-        // Second separator.
-        {
-        float const valColWidth(ImGui::CalcTextSize("0000000000000000").x +
-            2 * paddingX);
-        ImVec2 const sepStart(tablePos.x + addrColWidth + numElems*valColWidth,
-                              tablePos.y + rowHeight + paddingY);
-        ImVec2 const sepEnd(sepStart.x, sepStart.y + sepLen);
-        drawList->AddLine(sepStart, sepEnd, ImGui::GetColorU32(sepColor));
+    ImGuiListClipper clipper;
+    clipper.Begin(dumpNumLines);
+    while (clipper.Step()) {
+        for (int i(clipper.DisplayStart); i < clipper.DisplayEnd; ++i) {
+            printRow(i);
         }
     }
 
-    ImGui::End();
+
+    ImGui::EndTable();
+
+    // Draw separators between the addresses and the content and between the
+    // content and the ASCII repr.
+    // Note: Dear ImGui does not support only drawing borders on _some_ columns
+    // hence we are forced to use the DrawList API here.
+    ImDrawList* const drawList(ImGui::GetWindowDrawList());
+    float const paddingX(style.CellPadding.x);
+    float const paddingY(style.CellPadding.y);
+    float const addrColWidth(ImGui::CalcTextSize("0x0000000000000000").x +
+        paddingX);
+
+    // The separator spans all displayed rows of the table, excepted the
+    // first header row. Use some padding to make it pretty.
+    float const sepLen(tableHeight - rowHeight - 2 * paddingY);
+
+    // First separator.
+    {
+    ImVec2 const sepStart(tablePos.x + addrColWidth,
+                          tablePos.y + rowHeight + paddingY);
+    ImVec2 const sepEnd(sepStart.x, sepStart.y + sepLen);
+    drawList->AddLine(sepStart, sepEnd, ImGui::GetColorU32(separatorColor));
+    }
+
+    // Second separator.
+    {
+    float const valColWidth(ImGui::CalcTextSize("0000000000000000").x +
+        2 * paddingX);
+    ImVec2 const sepStart(tablePos.x + addrColWidth + numElems*valColWidth,
+                          tablePos.y + rowHeight + paddingY);
+    ImVec2 const sepEnd(sepStart.x, sepStart.y + sepLen);
+    drawList->AddLine(sepStart, sepEnd, ImGui::GetColorU32(separatorColor));
+    }
 }
 }
