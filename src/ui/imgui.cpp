@@ -466,69 +466,79 @@ void Imgui::RegisterWindow::doDraw(State const& state) {
 }
 
 void Imgui::RegisterWindow::doDrawGeneralPurpose(State const& state) {
+    Snapshot::Registers const& regs(state.registers());
+    Snapshot::Registers const& prevRegs(state.prevRegisters());
+
+    // All tables are using the same flags.
+    ImGuiTableFlags const tableFlags(ImGuiTableFlags_ScrollY |
+                                     ImGuiTableFlags_ScrollX |
+                                     ImGuiTableFlags_SizingFixedFit);
+    // This rowHeight computation is a bit voodoo, but comes from the imgui
+    // demo so I guess we can trust it.
+    ImGuiStyle const& style(ImGui::GetStyle());
+    // Row height for all the tables in this tab.
+    float const rowHeight(ImGui::GetFontSize() + style.CellPadding.y * 2.0f);
+
+    // First table: General purpose registers rax, rbx, ..., r14, r15.
+    // Use layout 4 x 4 hence 4 rows and 3 spacing / empty rows. Fix the table
+    // height so it does not cover the entire window, we need the space for the
+    // next tables! Rows containing values also contain the previous values
+    // hence having double the height as empty rows.
+    float const table1Height((4 * 2 + 3) * rowHeight);
     ImGui::Text("  -- General Purpose --");
-    // Print general purpose registers rax, rbx, ..., r14, r15.
-    auto const printGp([&]() {
-        char const * const currFmt("%s = 0x%016lx    %s = 0x%016lx    "
-            "%s = 0x%016lx    %s = 0x%016lx");
-        char const * const histFmt("      0x%016lx          0x%016lx     "
-            "     0x%016lx          0x%016lx");
+    if (ImGui::BeginTable("##GP1", 12, tableFlags, ImVec2(0, table1Height))) {
+        // Print columns for a given registers containing current value and the
+        // previous one.
+#define PRINT_REG(regName)                                      \
+        do {                                                    \
+            ImGui::TableNextColumn();                           \
+            ImGui::Text(#regName);                              \
+            ImGui::TableNextColumn();                           \
+            ImGui::Text("=");                                   \
+            ImGui::TableNextColumn();                           \
+            ImGui::Text("0x%016lx", regs.regName);              \
+            ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);  \
+            ImGui::Text("0x%016lx", prevRegs.regName);          \
+            ImGui::PopStyleColor();                             \
+        } while (0)
 
-        ImGui::Text(currFmt,
-                    "rax", state.registers().rax,
-                    "rbx", state.registers().rbx,
-                    "rcx", state.registers().rcx,
-                    "rdx", state.registers().rdx);
-        ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
-        ImGui::Text(histFmt,
-                    state.prevRegisters().rax, state.prevRegisters().rbx,
-                    state.prevRegisters().rcx,
-                    state.prevRegisters().rdx);
-        ImGui::PopStyleColor();
-        ImGui::Text("");
+        PRINT_REG(rax);
+        PRINT_REG(rbx);
+        PRINT_REG(rcx);
+        PRINT_REG(rdx);
 
-        ImGui::Text(currFmt,
-                    "rsi", state.registers().rsi,
-                    "rdi", state.registers().rdi,
-                    "rsp", state.registers().rsp,
-                    "rbp", state.registers().rbp);
-        ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
-        ImGui::Text(histFmt,
-                    state.prevRegisters().rsi,
-                    state.prevRegisters().rdi,
-                    state.prevRegisters().rsp,
-                    state.prevRegisters().rbp);
-        ImGui::PopStyleColor();
-        ImGui::Text("");
+        // Spacing.
+        ImGui::TableNextColumn();
+        ImGui::Text(" ");
+        ImGui::TableNextRow();
 
-        ImGui::Text(currFmt,
-                    "r8 ", state.registers().r8,
-                    "r9 ", state.registers().r9,
-                    "r10", state.registers().r10,
-                    "r11", state.registers().r11);
-        ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
-        ImGui::Text(histFmt,
-                    state.prevRegisters().r8,
-                    state.prevRegisters().r9,
-                    state.prevRegisters().r10,
-                    state.prevRegisters().r11);
-        ImGui::PopStyleColor();
-        ImGui::Text("");
+        PRINT_REG(rsi);
+        PRINT_REG(rdi);
+        PRINT_REG(rsp);
+        PRINT_REG(rbp);
 
-        ImGui::Text(currFmt,
-                    "r12", state.registers().r12,
-                    "r13", state.registers().r13,
-                    "r14", state.registers().r14,
-                    "r15", state.registers().r15);
-        ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
-        ImGui::Text(histFmt,
-                    state.prevRegisters().r12,
-                    state.prevRegisters().r13,
-                    state.prevRegisters().r14,
-                    state.prevRegisters().r15);
-        ImGui::PopStyleColor();
-        ImGui::Text("");
-    });
+        // Spacing.
+        ImGui::TableNextColumn();
+        ImGui::Text(" ");
+        ImGui::TableNextRow();
+
+        PRINT_REG(r8);
+        PRINT_REG(r9);
+        PRINT_REG(r10);
+        PRINT_REG(r11);
+
+        // Spacing.
+        ImGui::TableNextColumn();
+        ImGui::Text(" ");
+        ImGui::TableNextRow();
+
+        PRINT_REG(r12);
+        PRINT_REG(r13);
+        PRINT_REG(r14);
+        PRINT_REG(r15);
+
+        ImGui::EndTable();
+    }
 
     // Compute the string representation of rflags in the form:
     //  "IOPL=x [A B C ...]"
@@ -539,21 +549,11 @@ void Imgui::RegisterWindow::doDrawGeneralPurpose(State const& state) {
     auto const rflagsToString([](u64 const rflags) {
         // Map 2 ** i to its associated mnemonic.
         static std::map<u32, std::string> const mnemonics({
-            {(1 << 21), "ID"},
-            {(1 << 20), "VIP"},
-            {(1 << 19), "VIF"},
-            {(1 << 18), "AC"},
-            {(1 << 17), "VM"},
-            {(1 << 16), "RF"},
-            {(1 << 14), "NT"},
-            {(1 << 11), "OF"},
-            {(1 << 10), "DF"},
-            {(1 << 9), "IF"},
-            {(1 << 8), "TF"},
-            {(1 << 7), "SF"},
-            {(1 << 6), "ZF"},
-            {(1 << 4), "AF"},
-            {(1 << 2), "PF"},
+            {(1 << 21), "ID"}, {(1 << 20), "VIP"}, {(1 << 19), "VIF"},
+            {(1 << 18), "AC"}, {(1 << 17), "VM"},  {(1 << 16), "RF"},
+            {(1 << 14), "NT"}, {(1 << 11), "OF"},  {(1 << 10), "DF"},
+            {(1 << 9), "IF"},  {(1 << 8), "TF"},   {(1 << 7), "SF"},
+            {(1 << 6), "ZF"},  {(1 << 4), "AF"},   {(1 << 2), "PF"},
             {(1 << 0), "CF"},
         });
         u64 const iopl((rflags >> 12) & 0x3);
@@ -576,80 +576,129 @@ void Imgui::RegisterWindow::doDrawGeneralPurpose(State const& state) {
         res += "]";
         return res;
     });
-    printGp();
 
-    ImGui::Text("rip = 0x%016lx    rfl = 0x%016lx %s",
-                state.registers().rip,
-                state.registers().rflags,
-                rflagsToString(state.registers().rflags).c_str());
-    ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
-    ImGui::Text("      0x%016lx          0x%016lx %s",
-                state.prevRegisters().rip,
-                state.prevRegisters().rflags,
-                rflagsToString(state.prevRegisters().rflags).c_str());
-    ImGui::PopStyleColor();
+    // Remaining GP registers are RIP and RFLAGS. RFLAGS is pretty printed (we
+    // show individual flags) therefore its string representation is large,
+    // larger than 64-bit hexadecimal. We print RFLAGS (and RIP) in a separate
+    // table so that RFLAGS does not mess-up the aligment.
+    // Only a single row for this table, but this row contains both the current
+    // and previous values of RIP and RFLAGS hence the double height.
+    float const table2Height(2 * rowHeight);
+    if (ImGui::BeginTable("##GP2", 6, tableFlags, ImVec2(0, table2Height))) {
+        // Can reuse the PRINT_REG for RIP.
+        PRINT_REG(rip);
+        // RFLAGS requires some pretty printing, hence manual.
 
+        ImGui::TableNextColumn();
+        ImGui::Text("rfl");
+        ImGui::TableNextColumn();
+        ImGui::Text("=");
+        ImGui::TableNextColumn();
+        u64 const rflg(state.registers().rflags);
+        u64 const prevRflg(state.prevRegisters().rflags);
+        ImGui::Text("0x%016lx %s", rflg, rflagsToString(rflg).c_str());
+        ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
+        ImGui::Text("0x%016lx %s", prevRflg, rflagsToString(prevRflg).c_str());
+        ImGui::PopStyleColor();
+
+        ImGui::EndTable();
+    }
+
+    // Segment registers, simple layout on a single row.
     ImGui::Separator();
     ImGui::Text("  -- Segments --");
-    ImGui::Text("cs = 0x%04x  ds = 0x%04x  es = 0x%04x  fs = 0x%04x  "
-                "gs = 0x%04x  ss = 0x%04x",
-                state.registers().cs,
-                state.registers().ds,
-                state.registers().es,
-                state.registers().fs,
-                state.registers().gs,
-                state.registers().ss);
-    ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
-    ImGui::Text("     0x%04x       0x%04x       0x%04x       0x%04x       "
-                "0x%04x       0x%04x",
-                state.prevRegisters().cs,
-                state.prevRegisters().ds,
-                state.prevRegisters().es,
-                state.prevRegisters().fs,
-                state.prevRegisters().gs,
-                state.prevRegisters().ss);
-    ImGui::PopStyleColor();
+    // Use a 1 x 6 layout, single double-height row.
+    float const table3Height(table2Height);
+    if (ImGui::BeginTable("##GP3", 18, tableFlags, ImVec2(0, table3Height))) {
+#undef PRINT_REG
+#define PRINT_REG(regName)                                      \
+        do {                                                    \
+            ImGui::TableNextColumn();                           \
+            ImGui::Text(#regName);                              \
+            ImGui::TableNextColumn();                           \
+            ImGui::Text("=");                                   \
+            ImGui::TableNextColumn();                           \
+            ImGui::Text("0x%04x", regs.regName);                \
+            ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);  \
+            ImGui::Text("0x%04x", prevRegs.regName);            \
+            ImGui::PopStyleColor();                             \
+        } while (0)
 
+        PRINT_REG(cs);
+        PRINT_REG(ds);
+        PRINT_REG(es);
+        PRINT_REG(fs);
+        PRINT_REG(gs);
+        PRINT_REG(ss);
+
+        ImGui::EndTable();
+    }
+
+    // IDT and GDT. As before simple layout with a single row.
     ImGui::Separator();
     ImGui::Text("  -- Tables --");
-    ImGui::Text("idt: base = 0x%016lx  limit = 0x%08x    "
-                "gdt: base = 0x%016lx  limit = 0x%08x",
-                state.registers().idt.base,
-                state.registers().idt.limit,
-                state.registers().gdt.base,
-                state.registers().gdt.limit);
-    ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
-    ImGui::Text("            0x%016lx          0x%08x                "
-                "0x%016lx          0x%08x",
-                state.prevRegisters().idt.base,
-                state.prevRegisters().idt.limit,
-                state.prevRegisters().gdt.base,
-                state.prevRegisters().gdt.limit);
-    ImGui::PopStyleColor();
+    // Use a 1 x 4 layout (base and limit for both IDT and GDT), single
+    // double-height row.
+    float const table4Height(table3Height);
+    if (ImGui::BeginTable("##GP4", 12, tableFlags, ImVec2(0, table4Height))) {
+#undef PRINT_REG
+#define PRINT_REG(regName)                                      \
+        do {                                                    \
+            ImGui::TableNextColumn();                           \
+            ImGui::Text(#regName ": base");                     \
+            ImGui::TableNextColumn();                           \
+            ImGui::Text("=");                                   \
+            ImGui::TableNextColumn();                           \
+            ImGui::Text("0x%016lx", regs.regName.base);         \
+            ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);  \
+            ImGui::Text("0x%016lx", prevRegs.regName.base);     \
+            ImGui::PopStyleColor();                             \
+                                                                \
+            ImGui::TableNextColumn();                           \
+            ImGui::Text("limit");                               \
+            ImGui::TableNextColumn();                           \
+            ImGui::Text("=");                                   \
+            ImGui::TableNextColumn();                           \
+            ImGui::Text("0x%08x", regs.regName.limit);          \
+            ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);  \
+            ImGui::Text("0x%08x", prevRegs.regName.limit);      \
+            ImGui::PopStyleColor();                             \
+        } while (0)
 
+        PRINT_REG(idt);
+        PRINT_REG(gdt);
+        ImGui::EndTable();
+    }
+
+    // Control registers.
     ImGui::Separator();
     ImGui::Text("  -- Control --");
-    ImGui::Text("cr0 = 0x%016lx    cr2 = 0x%016lx    cr3 = 0x%016lx",
-                state.registers().cr0,
-                state.registers().cr2,
-                state.registers().cr3);
-    ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
-    ImGui::Text("      0x%016lx          0x%016lx          0x%016lx",
-                state.prevRegisters().cr0,
-                state.prevRegisters().cr2,
-                state.prevRegisters().cr3);
-    ImGui::PopStyleColor();
-    ImGui::Text("");
-    ImGui::Text("cr4 = 0x%016lx    cr8 = 0x%016lx   efer = 0x%016lx",
-                state.registers().cr4,
-                state.registers().cr8,
-                state.registers().efer);
-    ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
-    ImGui::Text("      0x%016lx          0x%016lx          0x%016lx",
-                state.prevRegisters().cr4,
-                state.prevRegisters().cr8,
-                state.prevRegisters().efer);
-    ImGui::PopStyleColor();
+    // Use 3 cols and 2 double-height rows.
+    float const table5Height((2 * 2) * rowHeight);
+    if (ImGui::BeginTable("##GP5", 9, tableFlags, ImVec2(0, table5Height))) {
+#undef PRINT_REG
+#define PRINT_REG(regName)                                      \
+        do {                                                    \
+            ImGui::TableNextColumn();                           \
+            ImGui::Text(#regName);                              \
+            ImGui::TableNextColumn();                           \
+            ImGui::Text("=");                                   \
+            ImGui::TableNextColumn();                           \
+            ImGui::Text("0x%016lx", regs.regName);              \
+            ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);  \
+            ImGui::Text("0x%016lx", prevRegs.regName);          \
+            ImGui::PopStyleColor();                             \
+        } while (0)
+
+        PRINT_REG(cr0);
+        PRINT_REG(cr2);
+        PRINT_REG(cr3);
+        PRINT_REG(cr4);
+        PRINT_REG(cr8);
+        PRINT_REG(efer);
+
+        ImGui::EndTable();
+    }
 }
 
 void Imgui::RegisterWindow::doDrawFpuMmx(State const& state) {
