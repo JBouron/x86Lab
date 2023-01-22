@@ -427,9 +427,43 @@ void Imgui::StackWindow::doDraw(State const& state) {
     m_previousRbp = state.registers().rbp;
 }
 
+std::map<Imgui::DisplayFormat, std::string> const Imgui::formatToString = {
+    {Imgui::DisplayFormat::Hexadecimal, "Hexadecimal"},
+    {Imgui::DisplayFormat::SignedDecimal, "Signed decimal"},
+    {Imgui::DisplayFormat::UnsignedDecimal, "Unsigned decimal"},
+    {Imgui::DisplayFormat::FloatingPoint, "Floating point"},
+};
+
+// This is essentially as cross product of DisplayFormat and {8, 16, 32, 64}
+// except that floating point values are only supported for 32 and 64 bit
+// widths.
+std::map<std::pair<Imgui::DisplayFormat, u8>, char const*> const
+Imgui::displayFormatAndBitsToFormatString = {
+    {std::make_pair(Imgui::DisplayFormat::Hexadecimal,  8), "0x%02x"},
+    {std::make_pair(Imgui::DisplayFormat::Hexadecimal, 16), "0x%04x"},
+    {std::make_pair(Imgui::DisplayFormat::Hexadecimal, 32), "0x%08x"},
+    {std::make_pair(Imgui::DisplayFormat::Hexadecimal, 64), "0x%016lx"},
+
+    {std::make_pair(Imgui::DisplayFormat::SignedDecimal,  8), "%d"},
+    {std::make_pair(Imgui::DisplayFormat::SignedDecimal, 16), "%d"},
+    {std::make_pair(Imgui::DisplayFormat::SignedDecimal, 32), "%d"},
+    {std::make_pair(Imgui::DisplayFormat::SignedDecimal, 64), "%ld"},
+
+    {std::make_pair(Imgui::DisplayFormat::UnsignedDecimal,  8), "%u"},
+    {std::make_pair(Imgui::DisplayFormat::UnsignedDecimal, 16), "%u"},
+    {std::make_pair(Imgui::DisplayFormat::UnsignedDecimal, 32), "%u"},
+    {std::make_pair(Imgui::DisplayFormat::UnsignedDecimal, 64), "%lu"},
+
+    {std::make_pair(Imgui::DisplayFormat::FloatingPoint, 32), "%f"},
+    {std::make_pair(Imgui::DisplayFormat::FloatingPoint, 64), "%f"},
+};
+
 Imgui::RegisterWindow::RegisterWindow() :
     Window(defaultTitle, Imgui::defaultWindowFlags),
-    m_currentGranularity(Granularity::Qword) {}
+    m_currentGranularity(Granularity::Qword) {
+    m_gpFormatDropdown = std::make_unique<Dropdown<DisplayFormat>>(
+        "Value display format:", formatToString);
+}
 
 // Compute the next value of an enum, wrapping around to the first value of the
 // enumeration if needed. This assume that the type of the enum (E) contains a
@@ -523,15 +557,45 @@ void Imgui::RegisterWindow::doDrawGeneralPurpose(State const& state) {
     ImGuiStyle const& style(ImGui::GetStyle());
     // Row height for all the tables in this tab.
     float const rowHeight(ImGui::GetFontSize() + style.CellPadding.y * 2.0f);
+    // The column containing 64-bit register values have a fixed width that can
+    // contain the largest 64-bit (un-)signed value. We do this so that switch
+    // between hex and decimal keeps a consistent alignment and avoids very
+    // narow colums with small values.
+    float const valueColWidth(ImGui::CalcTextSize("+18446744073709551615").x);
 
     // First table: General purpose registers rax, rbx, ..., r14, r15.
     // Use layout 4 x 4 hence 4 rows and 3 spacing / empty rows. Fix the table
     // height so it does not cover the entire window, we need the space for the
     // next tables! Rows containing values also contain the previous values
     // hence having double the height as empty rows.
+    // Each row of the table has the following layout:
+    //   |rax|=|<value>|rbx|=|<value>|rcx|=|<value>|rdx|=|<value>|
+    //   |   | |<value>|   | |<value>|   | |<value>|   | |<value>|
+    // therefore need 12 columns.
     float const table1Height((4 * 2 + 3) * rowHeight);
     ImGui::Text("  -- General Purpose --");
+    // Draw the display format drop down.
+    m_gpFormatDropdown->draw();
     if (ImGui::BeginTable("##GP1", 12, tableFlags, ImVec2(0, table1Height))) {
+
+        // Changing the format only affect registers rax through r15 including
+        // rsp and rbp. Rip and rflags are not affected and always printed in
+        // hex format.
+        DisplayFormat const format(m_gpFormatDropdown->selection());
+        // The format string to use when printing rax ... r15.
+        char const * const fmtStr64(displayFormatAndBitsToFormatString.at(
+            std::make_pair(format, 64)));
+
+        // Setup the colums width so that colums containing register values have
+        // a fixed size that is large enough to contain the biggest 64 bit
+        // value.
+        ImGuiTableColumnFlags const colFlags(0);
+        for (u32 i(0); i < 4; ++i) {
+            ImGui::TableSetupColumn("#", colFlags, 0);
+            ImGui::TableSetupColumn("#", colFlags, 0);
+            ImGui::TableSetupColumn("#", colFlags, valueColWidth);
+        }
+
         // Print columns for a given registers containing current value and the
         // previous one.
 #define PRINT_REG(regName)                                      \
@@ -541,9 +605,9 @@ void Imgui::RegisterWindow::doDrawGeneralPurpose(State const& state) {
             ImGui::TableNextColumn();                           \
             ImGui::Text("=");                                   \
             ImGui::TableNextColumn();                           \
-            ImGui::Text("0x%016lx", regs.regName);              \
+            ImGui::Text(fmtStr64, regs.regName);                \
             ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);  \
-            ImGui::Text("0x%016lx", prevRegs.regName);          \
+            ImGui::Text(fmtStr64, prevRegs.regName);            \
             ImGui::PopStyleColor();                             \
         } while (0)
 
@@ -624,15 +688,34 @@ void Imgui::RegisterWindow::doDrawGeneralPurpose(State const& state) {
 
     // Remaining GP registers are RIP and RFLAGS. RFLAGS is pretty printed (we
     // show individual flags) therefore its string representation is large,
-    // larger than 64-bit hexadecimal. We print RFLAGS (and RIP) in a separate
-    // table so that RFLAGS does not mess-up the aligment.
+    // larger than 64-bit values. We print RFLAGS (and RIP) in a separate table
+    // so that RFLAGS does not mess-up the aligment.
     // Only a single row for this table, but this row contains both the current
     // and previous values of RIP and RFLAGS hence the double height.
+    // Table has the following layout.
+    //   |rip|=|<value>|rfl|=|<value> <str>|
+    //   |   | |<value>|   | |<value> <str>|
+    // hence 6 columns.
     float const table2Height(2 * rowHeight);
     if (ImGui::BeginTable("##GP2", 6, tableFlags, ImVec2(0, table2Height))) {
-        // Can reuse the PRINT_REG for RIP.
-        PRINT_REG(rip);
-        // RFLAGS requires some pretty printing, hence manual.
+        // Setup the column width for the one containing the rip value, we want
+        // to use the same width as the registers of the previous table so we
+        // keep everything correctly aligned on the "=". Note: We need to call
+        // TableSetupColumn on the columns before the one of interest.
+        ImGuiTableColumnFlags const colFlags(0);
+        ImGui::TableSetupColumn("#", colFlags, 0);
+        ImGui::TableSetupColumn("#", colFlags, 0);
+        ImGui::TableSetupColumn("#", colFlags, valueColWidth);
+
+        ImGui::TableNextColumn();
+        ImGui::Text("rip");
+        ImGui::TableNextColumn();
+        ImGui::Text("=");
+        ImGui::TableNextColumn();
+        ImGui::Text("0x%016lx", regs.rip);
+        ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
+        ImGui::Text("0x%016lx", prevRegs.rip);
+        ImGui::PopStyleColor();
 
         ImGui::TableNextColumn();
         ImGui::Text("rfl");

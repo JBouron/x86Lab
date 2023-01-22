@@ -238,6 +238,23 @@ private:
         virtual void doDraw(State const& state);
     };
 
+    // Different possible format for displaying values.
+    enum class DisplayFormat {
+        Hexadecimal,
+        SignedDecimal,
+        UnsignedDecimal,
+        FloatingPoint,
+    };
+
+    // Maps all values of the DisplayFormat enum to a string representation. Can
+    // be used for dropdown construction.
+    static const std::map<DisplayFormat, std::string> formatToString;
+
+    // Maps a DisplayFormat and number of bits to the format string needed to
+    // print this value. For instance this maps (Hexadecimal, 64) to "0x%016lx".
+    static const std::map<std::pair<DisplayFormat, u8>, char const*>
+        displayFormatAndBitsToFormatString;
+
     // Show the current state of the VM's registers. Organized in multiple tabs
     // to separate general-purpose registers and vector registers.
     class RegisterWindow : public Window {
@@ -297,6 +314,10 @@ private:
         void doDrawFpuMmx(State const& state);
         // Draw the tab showing SSE & AVX registers.
         void doDrawSseAvx(State const& state);
+
+        // The dropdown used to select the display format of general purpose
+        // registers.
+        std::unique_ptr<Dropdown<DisplayFormat>> m_gpFormatDropdown;
     };
 
     // Display the content of the VM's physical memory.
