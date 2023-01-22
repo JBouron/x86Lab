@@ -156,6 +156,51 @@ ImVec2 Imgui::Window::draw(ImVec2 const& position,
     return actualSize;
 }
 
+template<typename T>
+Imgui::Dropdown<T>::Dropdown(std::string const& label,
+                             std::map<T, std::string> const& options) :
+    m_label(label), m_options(options) {
+    assert(m_options.size() > 0);
+    m_selection = m_options.cbegin()->first;
+}
+
+template<typename T>
+void Imgui::Dropdown<T>::draw() {
+    // Print the label ourselves so that it is on the right of the dropdown
+    // instead of the left as it is by default.
+    ImGui::AlignTextToFramePadding();
+    ImGui::Text("%s", m_label.c_str());
+    ImGui::SameLine();
+    char const * const preview(m_options.at(m_selection).c_str());
+    // Instead of using m_label, use an invisible label in BeginCombo, the
+    // reason is because Dear Imgui seems to be buggy with empty label (e.g. "")
+    // in the case of a combo widget using an empty label prevent the dropdown
+    // and the user cannot see or select an option.
+    if (!ImGui::BeginCombo(" ", preview, comboFlags)) {
+        return;
+    }
+
+    // Draw all the options.
+    for (auto&& it : m_options) {
+        bool const isSelected(m_selection == it.first);
+        if (ImGui::Selectable(it.second.c_str(), isSelected)) {
+            m_selection = it.first;
+        }
+    }
+    ImGui::EndCombo();
+}
+
+template<typename T>
+void Imgui::Dropdown<T>::setSelection(T const& option) {
+    assert(m_options.contains(option));
+    m_selection = option;
+}
+
+template<typename T>
+T const& Imgui::Dropdown<T>::selection() const {
+    return m_selection;
+}
+
 Imgui::CodeWindow::CodeWindow() :
     Window(defaultTitle, Imgui::defaultWindowFlags),
     m_previousRip(~((u64)0)) {}

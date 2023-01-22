@@ -131,6 +131,44 @@ private:
         virtual void doDraw(State const& state) = 0;
     };
 
+    // Drop down widget. Allow to easily create a dropdown item containing
+    // options of a given type T.
+    template<typename T>
+    class Dropdown {
+    public:
+        // Create a dropdown widget with the given options.
+        // @param options: The options to display in the dropdown. Options are
+        // specified in a map where each key is an option, the value associated
+        // with a key/option is the string representation of that option, to be
+        // used when drawing the dropdown / options.
+        // Options appear in the dropdown in ascending order (e.g. ascending
+        // order of the keys of the map).
+        // The default selection is the first option.
+        Dropdown(std::string const& label,
+                 std::map<T, std::string> const& options);
+
+        // Draw the widget.
+        void draw();
+
+        // Force the selection to a particular option.
+        // @param option: The option to force the selection to.
+        void setSelection(T const& option);
+
+        // Get the value associated with the currently selected item in the
+        // dropdown.
+        T const& selection() const;
+
+    private:
+        // The flags to use for the combo object. Use default.
+        static constexpr ImGuiComboFlags comboFlags = 0;
+        // The label, printed on the right of the dropdown.
+        std::string m_label;
+        // The available options.
+        std::map<T, std::string> m_options;
+        // The currently selected option.
+        T m_selection;
+    };
+
     // Show the code being run in the VM. Simple layout printing each line of
     // the source file and highlighting the current instruction.
     class CodeWindow : public Window {
