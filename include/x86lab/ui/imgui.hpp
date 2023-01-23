@@ -302,7 +302,9 @@ private:
         // TableNextColumn before printing out each element of the vector
         // register.
         template<size_t W>
-        void drawColsForVec(vec<W> const& vec, Granularity const granularity);
+        void drawColsForVec(vec<W> const& vec,
+                            Granularity const granularity,
+                            DisplayFormat const displayFormat);
 
         // Override.
         virtual void doDraw(State const& state);
@@ -318,6 +320,14 @@ private:
         // The dropdown used to select the display format of general purpose
         // registers.
         std::unique_ptr<Dropdown<DisplayFormat>> m_gpFormatDropdown;
+
+        // MMX dropdowns for granularity and display format.
+        std::unique_ptr<Dropdown<Granularity>> m_mmxGranularityDropdown;
+        std::unique_ptr<Dropdown<DisplayFormat>> m_mmxFormatDropdown;
+
+        // SSE/AVX dropdown for granularity and display format.
+        std::unique_ptr<Dropdown<Granularity>> m_sseAvxGranularityDropdown;
+        std::unique_ptr<Dropdown<DisplayFormat>> m_sseAvxFormatDropdown;
     };
 
     // Display the content of the VM's physical memory.

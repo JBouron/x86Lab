@@ -453,7 +453,46 @@ Imgui::RegisterWindow::RegisterWindow() :
     Window(defaultTitle, Imgui::defaultWindowFlags),
     m_currentGranularity(Granularity::Qword) {
     m_gpFormatDropdown = std::make_unique<Dropdown<DisplayFormat>>(
-        "Value display format:", formatToString);
+        "display format", formatToString);
+
+    // MMX registers can only hold integer values, hence no Float or Double
+    // options. Additionally, an MMX register cannot hold a packed qword.
+    static std::map<Granularity, std::string> const mmxGranularityOpt({
+        {Granularity::Byte  , "Packed bytes"},
+        {Granularity::Word  , "Packed words"},
+        {Granularity::Dword , "Packed double-words"},
+    });
+    m_mmxGranularityDropdown = std::make_unique<Dropdown<Granularity>>(
+        "vector format", mmxGranularityOpt);
+
+    static std::map<DisplayFormat, std::string> const mmxDisplayFormatOpt({
+        {Imgui::DisplayFormat::Hexadecimal, "Hexadecimal"},
+        {Imgui::DisplayFormat::SignedDecimal, "Signed decimal"},
+        {Imgui::DisplayFormat::UnsignedDecimal, "Unsigned decimal"},
+    });
+    m_mmxFormatDropdown = std::make_unique<Dropdown<DisplayFormat>>(
+        "display format", mmxDisplayFormatOpt);
+
+    // SSE and AVX registers can hold any type.
+    static std::map<Granularity, std::string> const sseGranularityOpt({
+        {Granularity::Byte,   "Packed bytes"},
+        {Granularity::Word,   "Packed words"},
+        {Granularity::Dword,  "Packed double-words"},
+        {Granularity::Qword,  "Packed quad-words"},
+        {Granularity::Float,  "Packed floats"},
+        {Granularity::Double, "Packed doubles"},
+    });
+    m_sseAvxGranularityDropdown = std::make_unique<Dropdown<Granularity>>(
+        "vector format", sseGranularityOpt);
+
+    // We only use the display format dropdown when dealing with packed
+    // (unsigned) integers. When packed floats or packed doubles is selected,
+    // the display format is forced to DisplayFormat::FloatingPoint.
+    // Therefore we can share the map with mmx registers.
+    static std::map<DisplayFormat, std::string> const& sseDisplayFormatOpt(
+        mmxDisplayFormatOpt);
+    m_sseAvxFormatDropdown = std::make_unique<Dropdown<DisplayFormat>>(
+        "display format", sseDisplayFormatOpt);
 }
 
 // Compute the next value of an enum, wrapping around to the first value of the
@@ -485,28 +524,31 @@ std::map<Imgui::RegisterWindow::Granularity, u32> const
 
 template<size_t W>
 void Imgui::RegisterWindow::drawColsForVec(vec<W> const& vec,
-                                           Granularity const granularity) {
+                                           Granularity const granularity,
+                                           DisplayFormat const displayFormat) {
     u32 const numElems(vec.bytes / granularityToBytes.at(granularity));
+    char const * const fmt(displayFormatAndBitsToFormatString.at(
+        std::make_pair(displayFormat, granularityToBytes.at(granularity) * 8)));
     for (int i(numElems - 1); i >= 0; --i) {
         ImGui::TableNextColumn();
         switch (granularity) {
             case Granularity::Byte:
-                ImGui::Text("%02hhx", vec.template elem<u8>(i));
+                ImGui::Text(fmt, vec.template elem<u8>(i));
                 break;
             case Granularity::Word:
-                ImGui::Text("%04hx", vec.template elem<u16>(i));
+                ImGui::Text(fmt, vec.template elem<u16>(i));
                 break;
             case Granularity::Dword:
-                ImGui::Text("%08x", vec.template elem<u32>(i));
+                ImGui::Text(fmt, vec.template elem<u32>(i));
                 break;
             case Granularity::Qword:
-                ImGui::Text("%016lx", vec.template elem<u64>(i));
+                ImGui::Text(fmt, vec.template elem<u64>(i));
                 break;
             case Granularity::Float:
-                ImGui::Text("%f", vec.template elem<float>(i));
+                ImGui::Text(fmt, vec.template elem<float>(i));
                 break;
             case Granularity::Double:
-                ImGui::Text("%f", vec.template elem<double>(i));
+                ImGui::Text(fmt, vec.template elem<double>(i));
                 break;
             default:
                 throw std::runtime_error("Invalid granularity");
@@ -821,13 +863,10 @@ void Imgui::RegisterWindow::doDrawGeneralPurpose(State const& state) {
 }
 
 void Imgui::RegisterWindow::doDrawFpuMmx(State const& state) {
-    // MMX registers only hold packed integers, hence override the current
-    // granularity if it is set to float or double.
-    Granularity const granularity(
-        (m_currentGranularity == Granularity::Float ||
-         m_currentGranularity == Granularity::Double) ?
-            Granularity::Qword :
-            m_currentGranularity);
+    m_mmxGranularityDropdown->draw();
+    m_mmxFormatDropdown->draw();
+    Granularity const granularity(m_mmxGranularityDropdown->selection());
+    DisplayFormat const dispFmt(m_mmxFormatDropdown->selection());
 
     u32 const numElemForGran(vec64::bytes / granularityToBytes.at(granularity));
     // One column for the register name, one for each element in the current
@@ -855,23 +894,35 @@ void Imgui::RegisterWindow::doDrawFpuMmx(State const& state) {
 
     for (u8 i(0); i < X86Lab::Vm::State::Registers::NumMmxRegs; ++i) {
         ImGui::TableNextColumn();
-        ImGui::Text("%s", ("mmx" + std::to_string(i)).c_str());
-        drawColsForVec(state.registers().mmx[i], granularity);
+        ImGui::Text("%s", ("mm" + std::to_string(i)).c_str());
+        drawColsForVec(state.registers().mmx[i], granularity, dispFmt);
         ImGui::TableNextColumn();
         ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
-        drawColsForVec(state.prevRegisters().mmx[i], granularity);
+        drawColsForVec(state.prevRegisters().mmx[i], granularity, dispFmt);
         ImGui::PopStyleColor();
     }
     ImGui::EndTable();
 }
 
 void Imgui::RegisterWindow::doDrawSseAvx(State const& state) {
+    m_sseAvxGranularityDropdown->draw();
+    Granularity const gran(m_sseAvxGranularityDropdown->selection());
+    DisplayFormat dispFmt;
+    if (gran != Granularity::Float && gran != Granularity::Double) {
+        // When the granularity is set on packed integers, propose to change the
+        // display format.
+        m_sseAvxFormatDropdown->draw();
+        dispFmt = m_sseAvxFormatDropdown->selection();
+    } else {
+        // For packed floats and doubles the format is set to FloatingPoint.
+        dispFmt = DisplayFormat::FloatingPoint;
+    }
+
     // If AVX-512 is available, print the zmm registers, otherwise only
     // print ymms registers.
     u32 const bytePerVec(Util::Extension::hasAvx512() ?
                          vec512::bytes : vec256::bytes);
-    Granularity const granularity(m_currentGranularity);
-    u32 const numElemForGran(bytePerVec / granularityToBytes.at(granularity));
+    u32 const numElemForGran(bytePerVec / granularityToBytes.at(gran));
     u32 const numCols(1 + numElemForGran);
 
     ImGuiTableFlags const tableFlags(ImGuiTableFlags_ScrollX |
@@ -901,16 +952,16 @@ void Imgui::RegisterWindow::doDrawSseAvx(State const& state) {
         ImGui::TableNextColumn();
         ImGui::Text("%s", (name + std::to_string(i)).c_str());
         if (Util::Extension::hasAvx512()) {
-            drawColsForVec(state.registers().zmm[i], granularity);
+            drawColsForVec(state.registers().zmm[i], gran, dispFmt);
         } else {
-            drawColsForVec(state.registers().ymm[i], granularity);
+            drawColsForVec(state.registers().ymm[i], gran, dispFmt);
         }
         ImGui::TableNextColumn();
         ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
         if (Util::Extension::hasAvx512()) {
-            drawColsForVec(state.prevRegisters().zmm[i], granularity);
+            drawColsForVec(state.prevRegisters().zmm[i], gran, dispFmt);
         } else {
-            drawColsForVec(state.prevRegisters().ymm[i], granularity);
+            drawColsForVec(state.prevRegisters().ymm[i], gran, dispFmt);
         }
         ImGui::PopStyleColor();
     }
