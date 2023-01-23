@@ -166,17 +166,8 @@ Imgui::Dropdown<T>::Dropdown(std::string const& label,
 
 template<typename T>
 void Imgui::Dropdown<T>::draw() {
-    // Print the label ourselves so that it is on the right of the dropdown
-    // instead of the left as it is by default.
-    ImGui::AlignTextToFramePadding();
-    ImGui::Text("%s", m_label.c_str());
-    ImGui::SameLine();
     char const * const preview(m_options.at(m_selection).c_str());
-    // Instead of using m_label, use an invisible label in BeginCombo, the
-    // reason is because Dear Imgui seems to be buggy with empty label (e.g. "")
-    // in the case of a combo widget using an empty label prevent the dropdown
-    // and the user cannot see or select an option.
-    if (!ImGui::BeginCombo(" ", preview, comboFlags)) {
+    if (!ImGui::BeginCombo(m_label.c_str(), preview, comboFlags)) {
         return;
     }
 
