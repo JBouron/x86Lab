@@ -435,13 +435,13 @@ Imgui::displayFormatAndBitsToFormatString = {
     {std::make_pair(Imgui::DisplayFormat::Hexadecimal, 32), "0x%08x"},
     {std::make_pair(Imgui::DisplayFormat::Hexadecimal, 64), "0x%016lx"},
 
-    {std::make_pair(Imgui::DisplayFormat::SignedDecimal,  8), "%d"},
-    {std::make_pair(Imgui::DisplayFormat::SignedDecimal, 16), "%d"},
+    {std::make_pair(Imgui::DisplayFormat::SignedDecimal,  8), "%hhd"},
+    {std::make_pair(Imgui::DisplayFormat::SignedDecimal, 16), "%hd"},
     {std::make_pair(Imgui::DisplayFormat::SignedDecimal, 32), "%d"},
     {std::make_pair(Imgui::DisplayFormat::SignedDecimal, 64), "%ld"},
 
-    {std::make_pair(Imgui::DisplayFormat::UnsignedDecimal,  8), "%u"},
-    {std::make_pair(Imgui::DisplayFormat::UnsignedDecimal, 16), "%u"},
+    {std::make_pair(Imgui::DisplayFormat::UnsignedDecimal,  8), "%hhu"},
+    {std::make_pair(Imgui::DisplayFormat::UnsignedDecimal, 16), "%hu"},
     {std::make_pair(Imgui::DisplayFormat::UnsignedDecimal, 32), "%u"},
     {std::make_pair(Imgui::DisplayFormat::UnsignedDecimal, 64), "%lu"},
 
