@@ -931,17 +931,51 @@ void Imgui::RegisterWindow::doDrawSseAvx(State const& state) {
         dispFmt = DisplayFormat::FloatingPoint;
     }
 
-    // If AVX-512 is available, print the zmm registers, otherwise only
-    // print ymms registers.
-    u32 const bytePerVec(Util::Extension::hasAvx512() ?
-                         vec512::bytes : vec256::bytes);
-    u32 const numElemForGran(bytePerVec / granularityToBytes.at(gran));
-    u32 const numCols(1 + numElemForGran);
-
+    // Table and column flags for mask and vector registers.
     ImGuiTableFlags const tableFlags(ImGuiTableFlags_ScrollX |
                                      ImGuiTableFlags_ScrollY |
                                      ImGuiTableFlags_BordersInnerV);
     ImGuiTableColumnFlags const colFlags(ImGuiTableColumnFlags_WidthFixed);
+    // This rowHeight computation is a bit voodoo, but comes from the imgui
+    // demo so I guess we can trust it.
+    ImGuiStyle const& style(ImGui::GetStyle());
+    float const rowHeight(ImGui::GetFontSize() + style.CellPadding.y * 2.0f);
+
+    Snapshot::Registers const& regs(state.registers());
+
+    // MXCSR and mask registers (only if AVX-512 is supported).
+    bool const hasAvx512(Util::Extension::hasAvx512());
+    ImGui::Text("mxcsr = 0x%08x", regs.mxcsr);
+    if (hasAvx512) {
+        // For the mask registers we use a 2 rows x 4 cols layout like so:
+        //   |k0|=|<value>|k1|=|<value>|k2|=|<value>|k3|=|<value>|
+        //   |k4|=|<value>|k5|=|<value>|k6|=|<value>|k7|=|<value>|
+        // In order to save space we don't print the previous values of mask
+        // registers.
+        // Need to set the table height so that it does not span the entire
+        // window height.
+        ImVec2 const outerSize(0.0f, 2 * rowHeight);
+        ImGuiTableFlags const flags(tableFlags ^ ImGuiTableFlags_BordersInnerV);
+        if (ImGui::BeginTable("Mask regs", 12, flags, outerSize)) {
+            for (u32 i(0); i < Snapshot::Registers::NumKRegs; ++i) {
+                std::string const name("k" + std::to_string(i));
+                ImGui::TableNextColumn();
+                ImGui::Text("%s", name.c_str());
+                ImGui::TableNextColumn();
+                ImGui::Text("=");
+                ImGui::TableNextColumn();
+                ImGui::Text("0x%016lx", regs.k[i]);
+            }
+
+            ImGui::EndTable();
+        }
+    }
+
+    // If AVX-512 is available, print the zmm registers, otherwise only
+    // print ymms registers.
+    u32 const bytePerVec(hasAvx512 ? vec512::bytes : vec256::bytes);
+    u32 const numElemForGran(bytePerVec / granularityToBytes.at(gran));
+    u32 const numCols(1 + numElemForGran);
 
     if (!ImGui::BeginTable("SSE/AVX", numCols, tableFlags)) {
         return;
@@ -965,9 +999,9 @@ void Imgui::RegisterWindow::doDrawSseAvx(State const& state) {
         ImGui::TableNextColumn();
         ImGui::Text("%s", (name + std::to_string(i)).c_str());
         if (Util::Extension::hasAvx512()) {
-            drawColsForVec(state.registers().zmm[i], gran, dispFmt);
+            drawColsForVec(regs.zmm[i], gran, dispFmt);
         } else {
-            drawColsForVec(state.registers().ymm[i], gran, dispFmt);
+            drawColsForVec(regs.ymm[i], gran, dispFmt);
         }
         ImGui::TableNextColumn();
         ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);
