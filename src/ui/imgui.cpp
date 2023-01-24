@@ -891,7 +891,10 @@ void Imgui::RegisterWindow::doDrawFpuMmx(State const& state) {
                                      ImGuiTableFlags_BordersInnerV);
     ImGuiTableColumnFlags const colFlags(ImGuiTableColumnFlags_WidthFixed);
 
-    if (!ImGui::BeginTable("MMX", numCols, tableFlags)) {
+    ImGuiStyle const& style(ImGui::GetStyle());
+    float const rowHeight(ImGui::GetFontSize() + style.CellPadding.y * 2.0f);
+    ImVec2 const outerSize(0, (2*Snapshot::Registers::NumMmxRegs+1)*rowHeight);
+    if (!ImGui::BeginTable("MMX", numCols, tableFlags, outerSize)) {
         return;
     }
 
@@ -977,7 +980,12 @@ void Imgui::RegisterWindow::doDrawSseAvx(State const& state) {
     u32 const numElemForGran(bytePerVec / granularityToBytes.at(gran));
     u32 const numCols(1 + numElemForGran);
 
-    if (!ImGui::BeginTable("SSE/AVX", numCols, tableFlags)) {
+    u32 const numRegs(Util::Extension::hasAvx512() ?
+                      X86Lab::Vm::State::Registers::NumZmmRegs :
+                      X86Lab::Vm::State::Registers::NumYmmRegs);
+
+    ImVec2 const outerSize(0, (2 * numRegs + 1) * rowHeight);
+    if (!ImGui::BeginTable("SSE/AVX", numCols, tableFlags, outerSize)) {
         return;
     }
 
@@ -990,9 +998,6 @@ void Imgui::RegisterWindow::doDrawSseAvx(State const& state) {
     }
     ImGui::TableHeadersRow();
 
-    u32 const numRegs(Util::Extension::hasAvx512() ?
-                      X86Lab::Vm::State::Registers::NumZmmRegs :
-                      X86Lab::Vm::State::Registers::NumYmmRegs);
     char const * const name(Util::Extension::hasAvx512()?"zmm":"ymm");
     for (u8 i(0); i < numRegs; ++i) {
         // Register name.
