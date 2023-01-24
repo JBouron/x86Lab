@@ -83,9 +83,6 @@ Action Imgui::doWaitForNextAction() {
             return Action::Step;
         } else if (ImGui::IsKeyPressed(ImGuiKey_R, true)) {
             return Action::ReverseStep;
-        } else if (ImGui::IsKeyPressed(ImGuiKey_Tab, false)) {
-            // Toggle the next granularity.
-            m_registerWindow->nextGranularity();
         } else if (ImGui::IsKeyPressed(ImGuiKey_Q, false)) {
             return Action::Quit;
         }
@@ -450,8 +447,7 @@ Imgui::displayFormatAndBitsToFormatString = {
 };
 
 Imgui::RegisterWindow::RegisterWindow() :
-    Window(defaultTitle, Imgui::defaultWindowFlags),
-    m_currentGranularity(Granularity::Qword) {
+    Window(defaultTitle, Imgui::defaultWindowFlags) {
     m_gpFormatDropdown = std::make_unique<Dropdown<DisplayFormat>>(
         "display format", formatToString);
 
@@ -493,23 +489,6 @@ Imgui::RegisterWindow::RegisterWindow() :
         mmxDisplayFormatOpt);
     m_sseAvxFormatDropdown = std::make_unique<Dropdown<DisplayFormat>>(
         "display format", sseDisplayFormatOpt);
-}
-
-// Compute the next value of an enum, wrapping around to the first value of the
-// enumeration if needed. This assume that the type of the enum (E) contains a
-// value called "__MAX" which appears last in the enum's declaration.
-// @param e: The value for which the next value should be computed.
-// @return: The value appearing after `e` in E's declaration, if this is "__MAX"
-// then this returns the first declared value in E.
-template<typename E>
-static E next(E const e) {
-    int const curr(static_cast<int>(e));
-    int const max(static_cast<int>(E::__MAX));
-    return static_cast<E>((curr + 1) % max);
-}
-
-void Imgui::RegisterWindow::nextGranularity() {
-    m_currentGranularity = next(m_currentGranularity);
 }
 
 std::map<Imgui::RegisterWindow::Granularity, u32> const

@@ -283,13 +283,9 @@ private:
             // Packed floating point values.
             Float,
             Double,
-
-            // Must be last.
-            __MAX,
         };
         // The granularity in which the vector registers are currently
         // displayed.
-        Granularity m_currentGranularity;
 
         // How many bytes is a single element in the given granularity. Used to
         // compute how many elements a vector register contains in a given
