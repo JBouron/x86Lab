@@ -984,8 +984,7 @@ void Imgui::RegisterWindow::doDrawSseAvx(State const& state) {
                       X86Lab::Vm::State::Registers::NumZmmRegs :
                       X86Lab::Vm::State::Registers::NumYmmRegs);
 
-    ImVec2 const outerSize(0, (2 * numRegs + 1) * rowHeight);
-    if (!ImGui::BeginTable("SSE/AVX", numCols, tableFlags, outerSize)) {
+    if (!ImGui::BeginTable("SSE/AVX", numCols, tableFlags)) {
         return;
     }
 
