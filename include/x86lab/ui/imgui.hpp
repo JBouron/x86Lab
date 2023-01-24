@@ -238,13 +238,31 @@ private:
         virtual void doDraw(State const& state);
     };
 
-    // Different possible format for displaying values.
+    // Different possible formats for displaying values.
     enum class DisplayFormat {
         Hexadecimal,
         SignedDecimal,
         UnsignedDecimal,
         FloatingPoint,
     };
+
+    // Different possible formats for displaying vector registers or memory
+    // dump.
+    enum class Granularity {
+        // Packed integers.
+        Byte,
+        Word,
+        Dword,
+        Qword,
+        // Packed floating point values.
+        Float,
+        Double,
+    };
+
+    // How many bytes is a single element in the given granularity. Used to
+    // compute how many elements a vector register contains in a given
+    // granularity.
+    static std::map<Granularity, u32> const granularityToBytes;
 
     // Maps all values of the DisplayFormat enum to a string representation. Can
     // be used for dropdown construction.
@@ -268,29 +286,6 @@ private:
 
         // The color of "old" register values in the history list.
         static constexpr ImVec4 oldValColor = ImVec4(0.35f, 0.35f, 0.35f, 1.0f);
-
-        // Vector registers can usually be interpreted in different ways: Packed
-        // bytes, words, dwords, ... or packed single / double precision fp.  To
-        // save screen-space only a single form / granularity is printed in the
-        // register window at a time. The user can then toggle the granularity
-        // as they please.
-        enum class Granularity {
-            // Packed integers.
-            Byte,
-            Word,
-            Dword,
-            Qword,
-            // Packed floating point values.
-            Float,
-            Double,
-        };
-        // The granularity in which the vector registers are currently
-        // displayed.
-
-        // How many bytes is a single element in the given granularity. Used to
-        // compute how many elements a vector register contains in a given
-        // granularity.
-        static std::map<Granularity, u32> const granularityToBytes;
 
         // Draw the columns for each element of a vector register in the given
         // granularity. This function assumes that we are currently drawing a
@@ -342,6 +337,12 @@ private:
         // The focused address in the memory dump in the memory window. The
         // table scrolls to this address. Can be changed using the input field.
         u64 m_focusedAddr;
+        // The dropdown used to select the granularity of the memory dump, e.g.
+        // bytes, words, ...
+        std::unique_ptr<Dropdown<Granularity>> m_granDropdown;
+        // The dropdown used to select the display format of the values of
+        // memory.
+        std::unique_ptr<Dropdown<DisplayFormat>> m_dispFormatDropdown;
         // Legend for the focus address input field.
         static constexpr char const * inputFieldText = "Jump to 0x";
         // The number of lines to show in the memory dump. FIXME: This really

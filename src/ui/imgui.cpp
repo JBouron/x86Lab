@@ -415,6 +415,15 @@ void Imgui::StackWindow::doDraw(State const& state) {
     m_previousRbp = state.registers().rbp;
 }
 
+std::map<Imgui::Granularity, u32> const Imgui::granularityToBytes = {
+    {Imgui::Granularity::Byte,   1},
+    {Imgui::Granularity::Word,   2},
+    {Imgui::Granularity::Dword,  4},
+    {Imgui::Granularity::Qword,  8},
+    {Imgui::Granularity::Float,  4},
+    {Imgui::Granularity::Double, 8},
+};
+
 std::map<Imgui::DisplayFormat, std::string> const Imgui::formatToString = {
     {Imgui::DisplayFormat::Hexadecimal, "Hexadecimal"},
     {Imgui::DisplayFormat::SignedDecimal, "Signed decimal"},
@@ -490,16 +499,6 @@ Imgui::RegisterWindow::RegisterWindow() :
     m_sseAvxFormatDropdown = std::make_unique<Dropdown<DisplayFormat>>(
         "display format", sseDisplayFormatOpt);
 }
-
-std::map<Imgui::RegisterWindow::Granularity, u32> const
-    Imgui::RegisterWindow::granularityToBytes = {
-    {Imgui::RegisterWindow::Granularity::Byte,   1},
-    {Imgui::RegisterWindow::Granularity::Word,   2},
-    {Imgui::RegisterWindow::Granularity::Dword,  4},
-    {Imgui::RegisterWindow::Granularity::Qword,  8},
-    {Imgui::RegisterWindow::Granularity::Float,  4},
-    {Imgui::RegisterWindow::Granularity::Double, 8},
-};
 
 template<size_t W>
 void Imgui::RegisterWindow::drawColsForVec(vec<W> const& vec,
@@ -1000,24 +999,42 @@ void Imgui::RegisterWindow::doDrawSseAvx(State const& state) {
 
 Imgui::MemoryWindow::MemoryWindow() :
     Window(defaultTitle, windowFlags),
-    m_focusedAddr(0) {}
+    m_focusedAddr(0) {
+    static std::map<Granularity, std::string> const dropdownOpt({
+        {Granularity::Byte,   "Bytes + ASCII"},
+        {Granularity::Word,   "Words"},
+        {Granularity::Dword,  "Doublewords"},
+        {Granularity::Qword,  "Quadwords"},
+        {Granularity::Float,  "Floats"},
+        {Granularity::Double, "Doubles"},
+    });
+    m_granDropdown = std::make_unique<Dropdown<Granularity>>("dump format",
+                                                             dropdownOpt);
+    static std::map<DisplayFormat, std::string> const displayFormatOpt({
+        {Imgui::DisplayFormat::Hexadecimal, "Hexadecimal"},
+        {Imgui::DisplayFormat::SignedDecimal, "Signed decimal"},
+        {Imgui::DisplayFormat::UnsignedDecimal, "Unsigned decimal"},
+    });
+    m_dispFormatDropdown = std::make_unique<Dropdown<DisplayFormat>>(
+        "value format", displayFormatOpt);
+}
 
 void Imgui::MemoryWindow::doDraw(State const& state) {
-    // FIXME: All of the code below is really hard-coded for showing 8 QWORDs
-    // per row. There should be a way to dynamically change this from the IU,
-    // e.g. show WORDs, DWORDs, floats, ... instead.
-
-    // Fow now, the layout of the memory dump is hard-coded to 8 QWORDs per line
-    // (e.g. a cache line). There is no plan to make this dynamic (e.g. adding a
-    // shortcut to change the granularity).
-    u64 const elemSize(8);
-    u64 const bytesPerLine(64);
+    Granularity const gran(m_granDropdown->selection());
+    u64 const elemSize(granularityToBytes.at(gran));
+    bool const showingAscii(gran == Granularity::Byte);
+    // When displaying bytes we also need space to print the ASCII
+    // representation. Follow what virtually every hexdump does and print 16
+    // bytes per line in that case. Otherwise we keep 64-bytes per line as this
+    // seems a comfortable length.
+    u64 const bytesPerLine(showingAscii ? 16 : 64);
     u64 const numElems(bytesPerLine / elemSize);
+    // Code below assume that bytesPerLine is divisible by elemSize.
+    assert(bytesPerLine % elemSize == 0);
 
     ImGuiStyle const& style(ImGui::GetStyle());
 
     // First widget: InputText field to select the currently focused address.
-
     // Print legend, AlignTextToFramePadding makes sure the text will be
     // centered with the input text.
     ImGui::AlignTextToFramePadding();
@@ -1054,7 +1071,27 @@ void Imgui::MemoryWindow::doDraw(State const& state) {
     }
 
     // Second widget: The table showing the memory dump.
+    bool const isPrintingFloats(gran == Granularity::Float ||
+                                gran == Granularity::Double);
+    // First show the dropdowns. The value format dropdown is only shown if the
+    // granularity is set to something other than Double and Float, because in
+    // those two cases the format is implicitely set to FloatingPoint.
+    ImGui::SameLine();
+    // Dropdown are evenly dividing the remaining space after the InputText.
+    float const dropdownWidth(
+        (ImGui::GetContentRegionAvail().x - ImGui::GetCursorPos().x) / 2);
+    ImGui::PushItemWidth(dropdownWidth);
+    m_granDropdown->draw();
+    ImGui::PopItemWidth();
+    if (!isPrintingFloats) {
+        ImGui::SameLine();
+        ImGui::PushItemWidth(dropdownWidth);
+        m_dispFormatDropdown->draw();
+        ImGui::PopItemWidth();
+    }
+
     ImGuiTableFlags const tableFlags(ImGuiTableFlags_ScrollY |
+                                     ImGuiTableFlags_ScrollX |
                                      ImGuiTableFlags_SizingFixedFit);
     ImGuiTableColumnFlags const colFlags(ImGuiTableColumnFlags_WidthFixed);
 
@@ -1074,22 +1111,24 @@ void Imgui::MemoryWindow::doDraw(State const& state) {
     ImVec2 const outerSize(0.0f, tableHeight);
     ImVec2 const tablePos(ImGui::GetCursorScreenPos());
 
-    if (!ImGui::BeginTable("MemoryDump", 10, tableFlags, outerSize)) {
+    // One column per element + the address. In case we are displaying bytes we
+    // also need a column for the ASCII repr.
+    u32 const numCols(showingAscii ? numElems + 2 : numElems + 1);
+    if (!ImGui::BeginTable("MemoryDump", numCols, tableFlags, outerSize)) {
         return;
     }
 
-    // The headers of the colums are always shown.
-    ImGui::TableSetupScrollFreeze(0, 1);
+    // The headers of the colums and the address are always shown.
+    ImGui::TableSetupScrollFreeze(1, 1);
     ImGui::TableSetupColumn("Address", colFlags);
-    ImGui::TableSetupColumn("+0x00", colFlags);
-    ImGui::TableSetupColumn("+0x08", colFlags);
-    ImGui::TableSetupColumn("+0x10", colFlags);
-    ImGui::TableSetupColumn("+0x18", colFlags);
-    ImGui::TableSetupColumn("+0x20", colFlags);
-    ImGui::TableSetupColumn("+0x28", colFlags);
-    ImGui::TableSetupColumn("+0x30", colFlags);
-    ImGui::TableSetupColumn("+0x38", colFlags);
-    ImGui::TableSetupColumn("ASCII", colFlags);
+    for (u32 i(0); i < numElems; ++i) {
+        std::ostringstream colName;
+        colName << "+0x" << std::hex << (i * elemSize);
+        ImGui::TableSetupColumn(colName.str().c_str(), colFlags);
+    }
+    if (showingAscii) {
+        ImGui::TableSetupColumn("ASCII", colFlags);
+    }
     ImGui::TableHeadersRow();
 
     if (focusedAddrChanged) {
@@ -1107,6 +1146,16 @@ void Imgui::MemoryWindow::doDraw(State const& state) {
         ImGui::SetScrollY(std::floor(scrollY / rowHeight) * rowHeight);
     }
 
+    DisplayFormat const dispFmt(isPrintingFloats ? DisplayFormat::FloatingPoint:
+                                m_dispFormatDropdown->selection());
+    // The format string to use in the call to ImGui::Text printing values.
+    char const * const fmt(displayFormatAndBitsToFormatString.at(
+        std::make_pair(dispFmt, elemSize * 8)));
+    std::shared_ptr<X86Lab::Snapshot const> const s(state.snapshot());
+    // The x position of the ascii column in screen space. This will be used
+    // below to draw the separator between the memory content and the ASCII
+    // repr.
+    float asciiColPosX;
     // Print a row in the table.
     // @param rowIdx: The index of the row. The resulting row will be for
     // offset = rowIdx * bytesPerLine.
@@ -1121,32 +1170,57 @@ void Imgui::MemoryWindow::doDraw(State const& state) {
         ImGui::Text("0x%016lx", offset);
         ImGui::PopStyleColor();
 
+        // We can use a vector register here so that reading elements from a
+        // line of memory is easy. Note that in the case of Byte granularity we
+        // are reading more data than needed (e.g. four lines since at this
+        // granularity each line is 16 bytes instead of 64), in that case we
+        // will only use the bottom 16 bytes of the read vec512.
+        vec512 const line(s->readPhysicalMemory(offset, 64).get());
 
-        std::shared_ptr<X86Lab::Snapshot const> const s(state.snapshot());
-        vec512 const line(s->readPhysicalMemory(offset,
-                                                bytesPerLine).get());
-
-        // Elements at that offset.
         for (u32 i(0); i < numElems; ++i) {
             ImGui::TableNextColumn();
-            ImGui::Text("%016lx", line.elem<u64>(i));
+            switch (gran) {
+                case Granularity::Byte:
+                    ImGui::Text(fmt, line.template elem<u8>(i));
+                    break;
+                case Granularity::Word:
+                    ImGui::Text(fmt, line.template elem<u16>(i));
+                    break;
+                case Granularity::Dword:
+                    ImGui::Text(fmt, line.template elem<u32>(i));
+                    break;
+                case Granularity::Qword:
+                    ImGui::Text(fmt, line.template elem<u64>(i));
+                    break;
+                case Granularity::Float:
+                    ImGui::Text(fmt, line.template elem<float>(i));
+                    break;
+                case Granularity::Double:
+                    ImGui::Text(fmt, line.template elem<double>(i));
+                    break;
+                default:
+                    throw std::runtime_error("Invalid granularity");
+            }
         }
 
         // ASCII repr.
-        ImGui::TableNextColumn();
-        for (u32 i(0); i < bytesPerLine; ++i) {
-            // Replace non-printable char by a darkened "." char.
-            char const ch(line.elem<u8>(i));
-            if (std::isprint(ch)) {
-                ImGui::Text("%c", ch);
-            } else {
-                ImGui::PushStyleColor(ImGuiCol_Text, nonPrintColor);
-                ImGui::Text(".");
-                ImGui::PopStyleColor();
+        if (showingAscii) {
+            ImGui::TableNextColumn();
+            asciiColPosX = ImGui::GetCursorScreenPos().x;
+            for (u32 i(0); i < bytesPerLine; ++i) {
+                // Replace non-printable char by a darkened "." char.
+                char const ch(line.elem<u8>(i));
+                if (std::isprint(ch)) {
+                    ImGui::Text("%c ", ch);
+                } else {
+                    ImGui::PushStyleColor(ImGuiCol_Text, nonPrintColor);
+                    ImGui::Text(". ");
+                    ImGui::PopStyleColor();
+                }
+                // Cancel-out the newline from the previous ImGui::Text(), next
+                // char is immediately following the previous one.
+                ImGui::SameLine(0, 0);
             }
-            // Cancel-out the newline from the previous ImGui::Text(), next
-            // char is immediately following the previous one.
-            ImGui::SameLine(0, 0);
         }
     });
 
@@ -1158,11 +1232,9 @@ void Imgui::MemoryWindow::doDraw(State const& state) {
         }
     }
 
-
     ImGui::EndTable();
 
-    // Draw separators between the addresses and the content and between the
-    // content and the ASCII repr.
+    // Draw separators between the addresses and the content.
     // Note: Dear ImGui does not support only drawing borders on _some_ columns
     // hence we are forced to use the DrawList API here.
     ImDrawList* const drawList(ImGui::GetWindowDrawList());
@@ -1176,21 +1248,19 @@ void Imgui::MemoryWindow::doDraw(State const& state) {
     float const sepLen(tableHeight - rowHeight - 2 * paddingY);
 
     // First separator.
-    {
     ImVec2 const sepStart(tablePos.x + addrColWidth,
                           tablePos.y + rowHeight + paddingY);
     ImVec2 const sepEnd(sepStart.x, sepStart.y + sepLen);
     drawList->AddLine(sepStart, sepEnd, ImGui::GetColorU32(separatorColor));
-    }
 
-    // Second separator.
-    {
-    float const valColWidth(ImGui::CalcTextSize("0000000000000000").x +
-        2 * paddingX);
-    ImVec2 const sepStart(tablePos.x + addrColWidth + numElems*valColWidth,
-                          tablePos.y + rowHeight + paddingY);
-    ImVec2 const sepEnd(sepStart.x, sepStart.y + sepLen);
-    drawList->AddLine(sepStart, sepEnd, ImGui::GetColorU32(separatorColor));
+    // When showing ASCII dump, also add a separator between the memory content
+    // and the ASCII column.
+    if (showingAscii) {
+        // The rowHeight is for the header row.
+        ImVec2 const sepStart(asciiColPosX - paddingX,
+                              tablePos.y + rowHeight + paddingY);
+        ImVec2 const sepEnd(sepStart.x, sepStart.y + sepLen);
+        drawList->AddLine(sepStart, sepEnd, ImGui::GetColorU32(separatorColor));
     }
 }
 }
