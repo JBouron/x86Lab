@@ -29,6 +29,10 @@ concept isPackable = std::is_same<T, u8>::value ||
                      std::is_same<T, double>::value ||
                      std::is_same<T, float>::value;
 
+template<typename T>
+concept isFloatingPoint = std::is_same<T, float>::value ||
+                          std::is_same<T, double>::value;
+
 // Representation of a vector register of a given width (Bits). This is meant to
 // replace the built-in types __uint128_t and intrisic types which are usually
 // implemented as array of smaller types (e.g. u256 is u32[4]). which makes
@@ -74,23 +78,45 @@ public:
     // The size of the vector in bytes.
     static constexpr u64 bytes = size<u8>;
 
-    // Access an element in the vec register (non-const).
+    // Access an int element in the vec register (non-const).
     // @param index: The index of the element to access.
     // @return: Reference to the index'th element of type T in the vec register.
-    template<typename T> requires isPackable<T>
+    template<typename T> requires (isPackable<T> && !isFloatingPoint<T>)
     T& elem(u8 const index) {
         assert(index < size<T>);
         return *(reinterpret_cast<T*>(m_data) + index);
     }
 
-    // Access an element in the vec register (const).
+    // Access an int element in the vec register (const).
     // @param index: The index of the element to access.
     // @return: Const reference to the index'th element of type T in the vec
     // register.
-    template<typename T> requires isPackable<T>
+    template<typename T> requires (isPackable<T> && !isFloatingPoint<T>)
     T const& elem(u8 const index) const {
         assert(index < size<T>);
         return *(reinterpret_cast<T const*>(m_data) + index);
+    }
+
+    // Access a float / double element in the vec register. The reason this is
+    // separate from the int variants is because reinterpret_cast<double> is
+    // undefined behaviour, hence we are constrained to use std::bit_cast. The
+    // problem with that is that it means we cannot return a reference to the
+    // element, we must return a copy. Unfortunately this means it is not
+    // possible to change a float / double element using elem<float>() or
+    // elem<double>().
+    // FIXME: If changing float/double element is really needed we should
+    // provide a custom Reference type.
+    // @param index: The index of the element to access.
+    // @return: Copy of the index'th element of type T in the vec register.
+    template<typename T> requires (isPackable<T> && isFloatingPoint<T>)
+    T elem(u8 const index) const {
+        // Re-interpret case is UB when dealing with floats or doubles, use
+        // a bit_cast instead.
+        if constexpr (std::is_same<T, float>::value) {
+            return std::bit_cast<T>(elem<u32>(index));
+        } else {
+            return std::bit_cast<T>(elem<u64>(index));
+        }
     }
 
     // Compare two vector register of the same width. Let the compiler defines
