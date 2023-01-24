@@ -631,17 +631,30 @@ void Imgui::RegisterWindow::doDrawGeneralPurpose(State const& state) {
 
         // Print columns for a given registers containing current value and the
         // previous one.
-#define PRINT_REG(regName)                                      \
-        do {                                                    \
-            ImGui::TableNextColumn();                           \
-            ImGui::Text(#regName);                              \
-            ImGui::TableNextColumn();                           \
-            ImGui::Text("=");                                   \
-            ImGui::TableNextColumn();                           \
-            ImGui::Text(fmtStr64, regs.regName);                \
-            ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);  \
-            ImGui::Text(fmtStr64, prevRegs.regName);            \
-            ImGui::PopStyleColor();                             \
+        // Notice the std::bit_cast for the FloatingPoint format, this cast is
+        // required because printing "%f" while passing a u64 cannot work: the
+        // u64 would be passed through RSI instead of XMM0 as a double would do,
+        // hence the Text() would read garbage from XMM0! Don't you just love
+        // ABI's ?
+#define PRINT_REG(regName)                                                     \
+        do {                                                                   \
+            ImGui::TableNextColumn();                                          \
+            ImGui::Text(#regName);                                             \
+            ImGui::TableNextColumn();                                          \
+            ImGui::Text("=");                                                  \
+            ImGui::TableNextColumn();                                          \
+            if (format == DisplayFormat::FloatingPoint) {                      \
+                ImGui::Text(fmtStr64, std::bit_cast<double>(regs.regName));    \
+            } else {                                                           \
+                ImGui::Text(fmtStr64, regs.regName);                           \
+            }                                                                  \
+            ImGui::PushStyleColor(ImGuiCol_Text, oldValColor);                 \
+            if (format == DisplayFormat::FloatingPoint) {                      \
+                ImGui::Text(fmtStr64, std::bit_cast<double>(prevRegs.regName));\
+            } else {                                                           \
+                ImGui::Text(fmtStr64, prevRegs.regName);                       \
+            }                                                                  \
+            ImGui::PopStyleColor();                                            \
         } while (0)
 
         PRINT_REG(rax);
