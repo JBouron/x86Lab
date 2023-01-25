@@ -167,6 +167,14 @@ private:
         std::map<T, std::string> m_options;
         // The currently selected option.
         T m_selection;
+        // Compute the width to be used by the child frame when drawing the
+        // combo widget.
+        float childFrameWidth();
+        // Used to cache the result of childFrameWidth(). The width of the child
+        // frame only needs to be computed once since the label and options
+        // never change overtime. The reason we cannot compute this value at
+        // construction time is because Imgui might not be fully initialized.
+        float m_childFrameWidth;
     };
 
     // Show the code being run in the VM. Simple layout printing each line of

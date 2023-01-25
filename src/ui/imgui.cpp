@@ -3,6 +3,7 @@
 #include <sstream>
 #include <iomanip>
 #include <cmath>
+#include <algorithm>
 
 namespace X86Lab::Ui {
 
@@ -156,26 +157,63 @@ ImVec2 Imgui::Window::draw(ImVec2 const& position,
 template<typename T>
 Imgui::Dropdown<T>::Dropdown(std::string const& label,
                              std::map<T, std::string> const& options) :
-    m_label(label), m_options(options) {
+    m_label(label), m_options(options), m_childFrameWidth(0) {
     assert(m_options.size() > 0);
     m_selection = m_options.cbegin()->first;
 }
 
 template<typename T>
 void Imgui::Dropdown<T>::draw() {
-    char const * const preview(m_options.at(m_selection).c_str());
-    if (!ImGui::BeginCombo(m_label.c_str(), preview, comboFlags)) {
-        return;
-    }
+    // All combos are drawn in their own child frame. We do this so that we can
+    // clamp the padding that is printed after the label (the lable
+    // automatically added by ImGui that is).
 
-    // Draw all the options.
-    for (auto&& it : m_options) {
-        bool const isSelected(m_selection == it.first);
-        if (ImGui::Selectable(it.second.c_str(), isSelected)) {
-            m_selection = it.first;
+    // Use zero padding on the child frame to keep alignment correct with
+    // parent.
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
+
+    // The size of the child frame, just enought to draw the combo and clamp
+    // right after the arrow button. The height is strange, I am not sure why it
+    // needs to be mult by 3 and not 2, however this seems to work so I leaving
+    // it at that.
+    ImVec2 const padding(ImGui::GetStyle().CellPadding);
+    ImVec2 const childSize(childFrameWidth(),
+                           ImGui::GetFontSize() + padding.y * 3.0f);
+
+    ImGuiWindowFlags const childFlags(ImGuiWindowFlags_NoDecoration |
+                                      ImGuiWindowFlags_NoBackground);
+
+    // The ID of the child frame is computed from the label, so technically we
+    // cannot have two dropdowns with the same label in the parent. This is fine
+    // though as this is a very peculiar case which does not occur in this
+    // program anyway.
+    ImGuiID const id(ImGui::GetID(m_label.c_str()));
+
+    ImGui::BeginChildFrame(id, childSize, childFlags);
+    ImGui::PopStyleVar();
+
+    // Draw the label ourselves. For some reason ImGui is drawing labels on the
+    // right of the combo boxes, which looks strange.
+    ImGui::AlignTextToFramePadding();
+    ImGui::Text("%s", m_label.c_str());
+    ImGui::SameLine();
+
+    // In order to draw without the label we need to push the item width to -1.
+    // See https://github.com/ocornut/imgui/issues/623.
+    ImGui::PushItemWidth(-1);
+    char const * const preview(m_options.at(m_selection).c_str());
+    if (ImGui::BeginCombo("##dummyLabel", preview, comboFlags)) {
+        // Draw all the options.
+        for (auto&& it : m_options) {
+            bool const isSelected(m_selection == it.first);
+            if (ImGui::Selectable(it.second.c_str(), isSelected)) {
+                m_selection = it.first;
+            }
         }
+        ImGui::EndCombo();
     }
-    ImGui::EndCombo();
+    ImGui::PopItemWidth();
+    ImGui::EndChild();
 }
 
 template<typename T>
@@ -187,6 +225,37 @@ void Imgui::Dropdown<T>::setSelection(T const& option) {
 template<typename T>
 T const& Imgui::Dropdown<T>::selection() const {
     return m_selection;
+}
+
+template<typename T>
+float Imgui::Dropdown<T>::childFrameWidth() {
+    if (!m_childFrameWidth) {
+        // The m_childFrameWidth was not yet computed.
+        // Essentially the combo box is nothing more than a framed text (the
+        // currently selected option) with a square button of side len = frame
+        // height. We also need to take into account the size of the label.
+        ImGuiStyle const& style(ImGui::GetStyle());
+        float const framePaddingX(style.FramePadding.x);
+
+        // Find the option with the longest name. We want the combo box to be
+        // sized just enough to fit the longest option.
+        std::vector<size_t> len;
+        std::transform(m_options.cbegin(), m_options.cend(),
+            std::back_inserter(len),
+            [](auto& it) {return ImGui::CalcTextSize(it.second.c_str()).x;});
+        // The width of the framed text for the longest option.
+        float const optionMaxWidth(*std::max_element(len.cbegin(), len.cend()) +
+            2 * framePaddingX);
+        // The width of the label, printed manually in draw().
+        float const labelWidth(ImGui::CalcTextSize(m_label.c_str()).x +
+            2 * framePaddingX);
+        // The width of the button. Really this should just be
+        // GetFrameHeightWithSpacing, but apparently that's not it, adding the
+        // * 2 works. Gotta love UI programming ...
+        float const buttonWidth(ImGui::GetFrameHeightWithSpacing() * 2);
+        m_childFrameWidth = labelWidth + optionMaxWidth + buttonWidth;
+    }
+    return m_childFrameWidth;
 }
 
 Imgui::CodeWindow::CodeWindow() :
@@ -458,7 +527,7 @@ Imgui::displayFormatAndBitsToFormatString = {
 Imgui::RegisterWindow::RegisterWindow() :
     Window(defaultTitle, Imgui::defaultWindowFlags) {
     m_gpFormatDropdown = std::make_unique<Dropdown<DisplayFormat>>(
-        "display format", formatToString);
+        "Value format:", formatToString);
 
     // MMX registers can only hold integer values, hence no Float or Double
     // options. Additionally, an MMX register cannot hold a packed qword.
@@ -468,7 +537,7 @@ Imgui::RegisterWindow::RegisterWindow() :
         {Granularity::Dword , "Packed double-words"},
     });
     m_mmxGranularityDropdown = std::make_unique<Dropdown<Granularity>>(
-        "vector format", mmxGranularityOpt);
+        "Vector format:", mmxGranularityOpt);
 
     static std::map<DisplayFormat, std::string> const mmxDisplayFormatOpt({
         {Imgui::DisplayFormat::Hexadecimal, "Hexadecimal"},
@@ -476,7 +545,7 @@ Imgui::RegisterWindow::RegisterWindow() :
         {Imgui::DisplayFormat::UnsignedDecimal, "Unsigned decimal"},
     });
     m_mmxFormatDropdown = std::make_unique<Dropdown<DisplayFormat>>(
-        "display format", mmxDisplayFormatOpt);
+        "Value format:", mmxDisplayFormatOpt);
 
     // SSE and AVX registers can hold any type.
     static std::map<Granularity, std::string> const sseGranularityOpt({
@@ -488,7 +557,7 @@ Imgui::RegisterWindow::RegisterWindow() :
         {Granularity::Double, "Packed doubles"},
     });
     m_sseAvxGranularityDropdown = std::make_unique<Dropdown<Granularity>>(
-        "vector format", sseGranularityOpt);
+        "Vector format:", sseGranularityOpt);
 
     // We only use the display format dropdown when dealing with packed
     // (unsigned) integers. When packed floats or packed doubles is selected,
@@ -497,7 +566,7 @@ Imgui::RegisterWindow::RegisterWindow() :
     static std::map<DisplayFormat, std::string> const& sseDisplayFormatOpt(
         mmxDisplayFormatOpt);
     m_sseAvxFormatDropdown = std::make_unique<Dropdown<DisplayFormat>>(
-        "display format", sseDisplayFormatOpt);
+        "Value format:", sseDisplayFormatOpt);
 }
 
 template<size_t W>
@@ -855,6 +924,7 @@ void Imgui::RegisterWindow::doDrawGeneralPurpose(State const& state) {
 
 void Imgui::RegisterWindow::doDrawFpuMmx(State const& state) {
     m_mmxGranularityDropdown->draw();
+    ImGui::SameLine();
     m_mmxFormatDropdown->draw();
     Granularity const granularity(m_mmxGranularityDropdown->selection());
     DisplayFormat const dispFmt(m_mmxFormatDropdown->selection());
@@ -905,6 +975,7 @@ void Imgui::RegisterWindow::doDrawSseAvx(State const& state) {
     if (gran != Granularity::Float && gran != Granularity::Double) {
         // When the granularity is set on packed integers, propose to change the
         // display format.
+        ImGui::SameLine();
         m_sseAvxFormatDropdown->draw();
         dispFmt = m_sseAvxFormatDropdown->selection();
     } else {
@@ -1008,7 +1079,7 @@ Imgui::MemoryWindow::MemoryWindow() :
         {Granularity::Float,  "Floats"},
         {Granularity::Double, "Doubles"},
     });
-    m_granDropdown = std::make_unique<Dropdown<Granularity>>("dump format",
+    m_granDropdown = std::make_unique<Dropdown<Granularity>>("Dump format:",
                                                              dropdownOpt);
     static std::map<DisplayFormat, std::string> const displayFormatOpt({
         {Imgui::DisplayFormat::Hexadecimal, "Hexadecimal"},
@@ -1016,7 +1087,7 @@ Imgui::MemoryWindow::MemoryWindow() :
         {Imgui::DisplayFormat::UnsignedDecimal, "Unsigned decimal"},
     });
     m_dispFormatDropdown = std::make_unique<Dropdown<DisplayFormat>>(
-        "value format", displayFormatOpt);
+        "Value format:", displayFormatOpt);
 }
 
 void Imgui::MemoryWindow::doDraw(State const& state) {
@@ -1077,17 +1148,10 @@ void Imgui::MemoryWindow::doDraw(State const& state) {
     // granularity is set to something other than Double and Float, because in
     // those two cases the format is implicitely set to FloatingPoint.
     ImGui::SameLine();
-    // Dropdown are evenly dividing the remaining space after the InputText.
-    float const dropdownWidth(
-        (ImGui::GetContentRegionAvail().x - ImGui::GetCursorPos().x) / 2);
-    ImGui::PushItemWidth(dropdownWidth);
     m_granDropdown->draw();
-    ImGui::PopItemWidth();
     if (!isPrintingFloats) {
         ImGui::SameLine();
-        ImGui::PushItemWidth(dropdownWidth);
         m_dispFormatDropdown->draw();
-        ImGui::PopItemWidth();
     }
 
     ImGuiTableFlags const tableFlags(ImGuiTableFlags_ScrollY |
