@@ -62,13 +62,46 @@ Vm::State::State(Registers const& regs, Memory && mem) :
     m_regs(regs),
     m_mem(std::move(mem)) {}
 
+// Compute ceil(a / b);
+static u64 ceil(u64 const a, u64 const b) {
+    return a / b + ((a % b == 0) ? 0 : 1);
+}
+
+static u64 roundUp(u64 const val, u64 const multiple) {
+    return multiple * ceil(val, multiple);
+}
+
+
 Vm::Vm(CpuMode const startMode, u64 const memorySize) :
     m_vmFd(Util::Kvm::createVm()),
     m_vcpuFd(Util::Kvm::createVcpu(m_vmFd)),
     m_kvmRun(Util::Kvm::getVcpuRunStruct(m_vcpuFd)),
-    m_physicalMemorySize(memorySize * PAGE_SIZE),
-    m_memory(std::get<0>(addPhysicalMemory(memorySize))),
     m_currState(OperatingState::NoCodeLoaded) {
+    // VM and VCPU are created in the initialization list. However we do need to
+    // add memory. Compute the number of pages that should be allocated for the
+    // guest's physical memory. The number of pages is the requested physical
+    // memory size (rounded-up to multiple of PAGE_SIZE) + any page required for
+    // the vcpu's data structures, this includes page tables when starting in
+    // long mode.
+    m_physicalMemorySize = roundUp(memorySize, PAGE_SIZE);
+    // Save where the extra physical memory is added. Any cpu data structure
+    // will start at m_extraMemoryOffset.
+    m_extraMemoryOffset = m_physicalMemorySize;
+    if (startMode == CpuMode::LongMode) {
+        // All physical memory is continuous so we simply need to divide by each
+        // page table level coverage.
+        u64 const numFrames(m_physicalMemorySize / PAGE_SIZE);
+        u64 const numPageTables(ceil(numFrames, 512));
+        u64 const numPageDirs(ceil(numPageTables, 512));
+        u64 const numPageDirPtrs(ceil(numPageDirs, 512));
+        // Add space for all the tables that will need to be allocated. The +1
+        // is for the PML4/root table which must be allocated.
+        m_physicalMemorySize +=
+            (1 + numPageTables + numPageDirs + numPageDirPtrs) * PAGE_SIZE;
+    }
+
+    // Allocate the guest's physical memory.
+    m_memory = createPhysicalMemory(m_physicalMemorySize);
 
     // We require some Kvm extension to implement some of the features of this
     // class. Check that all extension are supported on the host's KVM API now
@@ -104,13 +137,9 @@ Vm::~Vm() {
     }
 
     // Un-map all physical memory.
-    for (kvm_userspace_memory_region const& region : m_memorySlots) {
-        void * const addr(reinterpret_cast<void*>(region.userspace_addr));
-        u64 const len(region.memory_size);
-        if (::munmap(addr, len) == -1) {
-            // Virtually impossible if we are passing the output of mmap here.
-            std::perror("Failed to unmap memory region:");
-        }
+    if (::munmap(m_memory, m_physicalMemorySize) == -1) {
+        // Virtually impossible if we are passing the output of mmap here.
+        std::perror("Failed to unmap memory region:");
     }
 }
 
@@ -121,8 +150,10 @@ void Vm::loadCode(Code const& code) {
     State::Registers regs(getRegisters());
     // Set RIP to first instruction.
     regs.rip = 0x0;
-    // Set RSP to point after the end of physical memory.
-    regs.rsp = m_physicalMemorySize;
+    // Set RSP to point after the end of physical memory that is usable (meaning
+    // that we don't use the extra allocated memory as it potentially contains
+    // sensitive data like page tables).
+    regs.rsp = m_extraMemoryOffset;
     setRegisters(regs);
 
     // The KVM is now runnable.
@@ -531,6 +562,30 @@ u64 Vm::createIdentityMapping() {
         return (nextLevelOffset & 0xFFFFFFFFFFFFF000ULL) | 0x3;
     });
 
+    // The number of tables allocated, used by allocTable() to keep track of
+    // where the next table should be allocated.
+    u32 numTablesAlloc(0);
+
+    // Allocate a table in the extra physical memory.
+    // @return: A pair <void*, u64>. The first element is the virtual address
+    // in the host's address space pointing to the table, this address is used
+    // to read/write the table. The second element is the physical offset of the
+    // allocated table in the guest's physical memory.
+    auto const allocTable([&]() {
+        u64 const allocOffset(m_extraMemoryOffset + numTablesAlloc * PAGE_SIZE);
+        // To make it simple each allocation moves the m_extraMemoryOffset to
+        // the next free page/frame. This is fine because the extra allocated
+        // physical memory contains the exact amount of pages/tables we need and
+        // tables are never deallocated.
+        // The assert is here to make sure we computed the extra memory size
+        // correctly and we are not trying to allocate outside the guest's
+        // addressable physical memory.
+        assert(allocOffset < m_physicalMemorySize);
+        void * const hostAddr(static_cast<u8*>(m_memory) + allocOffset);
+        numTablesAlloc++;
+        return std::make_pair(hostAddr, allocOffset);
+    });
+
     // Helper lambda to ID map a physical frame on the guest. This function will
     // recurse into lower level table to map the frame.
     // @param pAddr: The physical address to map, must be PAGE_SIZE aligned.
@@ -555,7 +610,7 @@ u64 Vm::createIdentityMapping() {
                 // The entry is marked non-present, e.g. there is no table in
                 // the lower-level. Allocate the next table, map it to the
                 // current table, then recurse into it.
-                std::pair<void*, u64> const alloc(addPhysicalMemory(1));
+                std::pair<void*, u64> const alloc(allocTable());
                 // The offset of the allocated table in the guest's physical
                 // memory. This is the offset that we need to write in the
                 // current table's entry.
@@ -588,63 +643,50 @@ u64 Vm::createIdentityMapping() {
     });
 
     // Allocate a PML4, the root of the page table structure.
-    // Note: We cannot allocate the page tables as read-only memory because the
-    // vcpu writes the dirty and accessed bits in the page table entries.
-    std::pair<void*, u64> const pml4Alloc(addPhysicalMemory(1));
+    std::pair<void*, u64> const pml4Alloc(allocTable());
     // Host-side address of the PML4.
     u64 * const hostPml4(reinterpret_cast<u64*>(std::get<0>(pml4Alloc)));
     // Guest-side offset of the PML4.
     u64 const guestPml4(std::get<1>(pml4Alloc));
     assert(!(guestPml4 % PAGE_SIZE));
 
-    // Map each physical frame.
-    for (u64 offset(0); offset < m_physicalMemorySize; offset += PAGE_SIZE) {
+    // Map each physical frame. Note: For now we only ID map the amount of
+    // memory that was requested when creating the VM. We do not ID map the
+    // extra physical memory allocated for page tables. The reason: ID mapping
+    // the page tables themselves might require too much memory if the physical
+    // address space is too big.
+    for (u64 offset(0); offset < m_extraMemoryOffset; offset += PAGE_SIZE) {
         map(offset, hostPml4, 4);
     }
     return guestPml4;
 }
 
-std::pair<void*, u64> Vm::addPhysicalMemory(u32 const numPages) {
-    if (m_memorySlots.size() == Util::Kvm::getMaxMemSlots(m_vmFd)) {
-        // We are already using as many slots as we can. Note this will most
-        // likely never happen as KVM reports 32k slots on most machines.
-        throw KvmError("Reached max. number of memory slots on VM", 0);
-    }
-
-    u64 const allocSize(numPages * PAGE_SIZE);
-
+void *Vm::createPhysicalMemory(u64 const memorySize) {
     // Mmap some anonymous memory for the requested size.
     int const prot(PROT_READ | PROT_WRITE);
     int const flags(MAP_PRIVATE | MAP_ANONYMOUS);
-    void * const userspace(::mmap(NULL, allocSize, prot, flags, -1, 0));
-    if (userspace == MAP_FAILED) {
+    void * const userspaceAddr(::mmap(NULL, memorySize, prot, flags, -1, 0));
+    if (userspaceAddr == MAP_FAILED) {
         throw MmapError("Failed to mmap memory for guest", errno);
     }
 
     // Zero the allocated memory area.
-    std::memset(userspace, 0x0, allocSize);
-
-    u32 const numSlots(m_memorySlots.size());
-    kvm_userspace_memory_region const lastSlot(
-        !!numSlots ? m_memorySlots[numSlots-1] : kvm_userspace_memory_region{});
-
-    // The physical address of the new slot starts immediately after the last
-    // slot.
-    u64 const phyAddr(lastSlot.guest_phys_addr + lastSlot.memory_size);
+    std::memset(userspaceAddr, 0x0, memorySize);
 
     // Then map the memory to the guest.
     kvm_userspace_memory_region const kvmMap({
-        .slot = static_cast<u32>(m_memorySlots.size()),
+        // Only using a single slot. It does not matter much which one we
+        // choose.
+        .slot = 0,
         .flags = 0,
-        .guest_phys_addr = phyAddr,
-        .memory_size = allocSize,
-        .userspace_addr = reinterpret_cast<u64>(userspace),
+        .guest_phys_addr = 0,
+        .memory_size = memorySize,
+        .userspace_addr = reinterpret_cast<u64>(userspaceAddr),
     });
     if (::ioctl(m_vmFd, KVM_SET_USER_MEMORY_REGION, &kvmMap) == -1) {
         throw KvmError("Failed to map memory to guest", errno);
     }
-    // Adding the slot was successful, add it to the vector.
-    m_memorySlots.push_back(kvmMap);
-    return std::pair<void*, u64>(userspace, phyAddr);
+    return userspaceAddr;
 }
+
 }

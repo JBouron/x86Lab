@@ -151,12 +151,11 @@ public:
 
     // Creates a KVM with the given amount of memory.
     // @param startMode: The mode in which to start the Vm in.
-    // @param memorySize: The amount of physical memory in multiple of PAGE_SIZE
-    // to allocate for the VM. Note: In case the Vm is started in LongMode, more
+    // @param memorySize: The amount of physical memory in number of bytes. This
+    // value is rounded-up to the next multiple of PAGE_SIZE if it is not
+    // already the case. Note: In case the Vm is started in LongMode, more
     // physical memory is allocated than requested to hold the page table
-    // structure. This extra memory is NOT reported when calling getState(). The
-    // rationale here is that in most cases the user is not interested in seeing
-    // the page tables.
+    // structure. Hence there might be a few more pages than requested.
     // @throws: A KvmError is thrown in case of any error related to the KVM
     // initialization.
     // @throws: A MmapError is thrown in case of any error related to
@@ -238,17 +237,12 @@ private:
     // CR3.
     u64 createIdentityMapping();
 
-    // Add more physical memory to the guest. The added memory starts at the end
-    // of the current physical memory.
-    // @param numPages: The number of physical pages frames to allocate.
-    // @param isReadOnly: Indicate if this memory should be read-only for the
-    // guest VM. The user-space (e.g. this program) always have write permission
-    // on the allocated memory regardless of the value of isReadOnly.
-    // @return: A pair in which the first value is the host-address at which the
-    // new memory was mmap'ed, and the second is the guest-physical-address at
-    // which the allocated memory starts.
-    // @throws: KvmError or MmapError in case of kvm ioctl error or mmap error.
-    std::pair<void*, u64> addPhysicalMemory(u32 const numPages);
+    // Allocate the physical memory for the guest.
+    // @param memorySize: The size of the memory to allocate in bytes.
+    // @return: The address where the guest's physical memory has been mmap'ed
+    // in this process address space. The allocated memory is zero'ed. The
+    // allocated guest physical address space is allocated at offset 0.
+    void *createPhysicalMemory(u64 const numFrames);
 
     // File descriptor for the KVM.
     int const m_vmFd;
@@ -259,9 +253,13 @@ private:
     // hence use const reference.
     kvm_run const& m_kvmRun;
     // The size of the guest's physical memory in bytes.
-    size_t m_physicalMemorySize;
-    // Description of all the memory slots of this VM.
-    std::vector<kvm_userspace_memory_region> m_memorySlots;
+    u64 m_physicalMemorySize;
+    // The offset of the extra physical memory allocated used to hold cpu data
+    // structures such as page tables when starting the VM in long mode. This
+    // offset is the memory region starting after the requested memory size in
+    // the constructor. When the VM starts in a mode != LongMode, no extra
+    // memory is allocated.
+    u64 m_extraMemoryOffset;
     // Pointer to start of physical memory on the host (e.g. userspace).
     void *m_memory;
     // The current OperatingState of the KVM.

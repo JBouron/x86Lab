@@ -10,12 +10,12 @@ namespace X86Lab::Test::Vm {
 // Helper function to create a VM and load the given code to memory.
 // @param startMode: The cpu mode the VM should start in.
 // @param assembly: The assembly code to assemble and load into the Vm.
-// @param memorySizePages: The size of the physical memory in number of pages.
+// @param memorySize: The size of the physical memory in bytes.
 // @return: A unique_ptr for the instantiated VM.
 static std::unique_ptr<X86Lab::Vm> createVmAndLoadCode(
     X86Lab::Vm::CpuMode const startMode,
     std::string const& assembly,
-    u64 const memorySizePages = 1) {
+    u64 const memorySize = X86Lab::PAGE_SIZE) {
 
     // Create a temporary file to write the code into, it will be used as input
     // file for the assembler.
@@ -28,7 +28,7 @@ static std::unique_ptr<X86Lab::Vm> createVmAndLoadCode(
     file.close();
 
     Code const code(source.path());
-    std::unique_ptr<X86Lab::Vm> vm(new X86Lab::Vm(startMode, memorySizePages));
+    std::unique_ptr<X86Lab::Vm> vm(new X86Lab::Vm(startMode, memorySize));
     vm->loadCode(code);
     return vm;
 }
@@ -768,11 +768,12 @@ DECLARE_TEST(test64BitIdentityMapping) {
     )");
     // 1024 pages = 4MiB of memory. This should be enough to test the identity
     // mapping.
-    u64 const memSize(1024);
+    u64 const memSizePages(1024);
+    u64 const memSize(memSizePages * X86Lab::PAGE_SIZE);
     std::unique_ptr<X86Lab::Vm> const vm(
         createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly, memSize));
 
-    for (u64 i(0); i < memSize; ++i) {
+    for (u64 i(0); i < memSizePages; ++i) {
         u64 const writeOff(i * X86Lab::PAGE_SIZE);
         // Reset the registers to point to the mov instruction with the correct
         // address in RAX.
@@ -802,14 +803,14 @@ DECLARE_TEST(testReadMemory) {
     )");
     u64 const codeSize(4);
 
-    u64 const memSize(128);
+    u64 const memSize(128 * X86Lab::PAGE_SIZE);
     std::unique_ptr<X86Lab::Vm> const vm(
         createVmAndLoadCode(X86Lab::Vm::CpuMode::LongMode, assembly, memSize));
 
     // The number of WORDs to write, hence the entire memory, minus the code,
     // divided by the number of bytes per WORD (2). This is guaranteed to be
     // divisible by 2.
-    u64 const numWordsToFill((memSize * PAGE_SIZE - codeSize) / 2);
+    u64 const numWordsToFill((memSize - codeSize) / 2);
 
     // Run the VM until the rep stosw has been fully executed. This is needed
     // because rep'ed instructions do not inhibit interrupts.
