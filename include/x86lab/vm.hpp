@@ -246,22 +246,39 @@ private:
 
     // File descriptor for the KVM.
     int const m_vmFd;
+
     // File descriptor for the vCpu.
     int const m_vcpuFd;
+
     // Reference to the kvm_run structure associated with the vCpu. For now we
     // only read the kvm_run structure to get information on the exit reason,
     // hence use const reference.
     kvm_run const& m_kvmRun;
-    // The size of the guest's physical memory in bytes.
+
+    // The total size of the guest's physical memory in bytes.
     u64 m_physicalMemorySize;
+
+    // The size of the physical memory that was requested when calling the
+    // constructor. This might be different than m_physicalMemorySize for two
+    // reasons:
+    //  1. The m_physicalMemorySize is always a multiple of PAGE_SIZE. Hence
+    //  might be the requested memory size rounded-up to the next multiple of
+    //  PAGE_SIZE.
+    //  2. When starting in LongMode the cpu needs paging enabled and therefore
+    //  page tables. The physical memory used by those page table structures is
+    //  added in addition of the requested memory size.
+    u64 m_requestedMemorySize;
+
     // The offset of the extra physical memory allocated used to hold cpu data
     // structures such as page tables when starting the VM in long mode. This
     // offset is the memory region starting after the requested memory size in
     // the constructor. When the VM starts in a mode != LongMode, no extra
     // memory is allocated.
     u64 m_extraMemoryOffset;
+
     // Pointer to start of physical memory on the host (e.g. userspace).
     void *m_memory;
+
     // The current OperatingState of the KVM.
     OperatingState m_currState;
 };

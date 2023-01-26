@@ -76,28 +76,72 @@ Vm::Vm(CpuMode const startMode, u64 const memorySize) :
     m_vmFd(Util::Kvm::createVm()),
     m_vcpuFd(Util::Kvm::createVcpu(m_vmFd)),
     m_kvmRun(Util::Kvm::getVcpuRunStruct(m_vcpuFd)),
+    m_requestedMemorySize(memorySize),
     m_currState(OperatingState::NoCodeLoaded) {
-    // VM and VCPU are created in the initialization list. However we do need to
-    // add memory. Compute the number of pages that should be allocated for the
-    // guest's physical memory. The number of pages is the requested physical
-    // memory size (rounded-up to multiple of PAGE_SIZE) + any page required for
-    // the vcpu's data structures, this includes page tables when starting in
-    // long mode.
+    // VM and VCPU are created in the initialization list. However we still need
+    // to add memory. Physical memory size is rounded-up to a multiple of
+    // PAGE_SIZE.
     m_physicalMemorySize = roundUp(memorySize, PAGE_SIZE);
-    // Save where the extra physical memory is added. Any cpu data structure
-    // will start at m_extraMemoryOffset.
-    m_extraMemoryOffset = m_physicalMemorySize;
+
     if (startMode == CpuMode::LongMode) {
-        // All physical memory is continuous so we simply need to divide by each
-        // page table level coverage.
-        u64 const numFrames(m_physicalMemorySize / PAGE_SIZE);
-        u64 const numPageTables(ceil(numFrames, 512));
-        u64 const numPageDirs(ceil(numPageTables, 512));
-        u64 const numPageDirPtrs(ceil(numPageDirs, 512));
-        // Add space for all the tables that will need to be allocated. The +1
-        // is for the PML4/root table which must be allocated.
-        m_physicalMemorySize +=
-            (1 + numPageTables + numPageDirs + numPageDirPtrs) * PAGE_SIZE;
+        // When starting in LongMode, we need to allocate page tables therefore
+        // we need more memory than originally requested. We allocate more
+        // memory to make sure that if the user requests N * PAGE_SIZE of
+        // physical memory, all of that memory is usable (e.g. the user can
+        // read/write it without causing chaos).
+
+        // Save where the extra physical memory is added. Any cpu data structure
+        // will start at m_extraMemoryOffset.
+        m_extraMemoryOffset = m_physicalMemorySize;
+
+        // So we need to map m_physicalMemorySize / PAGE_SIZE frames to virtual
+        // memory. Knowing how many pages tables (and therefore additional
+        // frames) we need is straightforward, however we need to be wary of one
+        // thing: we want an identity mapping that also maps the page tables.
+        // This is where it gets hard: if we need P tables to map N frames, then
+        // we need to make sure that ID mapping the N frames + the P tables is
+        // not going to require more tables! In other words, we need to find P
+        // so that P tables can map the N frames as well as the P tables
+        // themselves. This is done using a fixed-point iteration.
+
+        u64 const startNumFrames(m_physicalMemorySize / PAGE_SIZE);
+        // The number of page tables / dirs / dir-ptr that we need so far.
+        u64 numPageTables(ceil(startNumFrames, 512));
+        u64 numPageDirs(ceil(numPageTables, 512));
+        u64 numPageDirPtrs(ceil(numPageDirs, 512));
+
+        // The fixed-point iteration: at each iteration we check how many page
+        // tables / dirs / dir-ptrs we need to map the physical frames as well
+        // as the tables themselves. We iterate until we don't need any more
+        // table.
+        bool pagingStructureChanged(true);
+        while (pagingStructureChanged) {
+            // We need to map all the physical frame + all the page table
+            // structures, including the PML4 hence the +1.
+            u64 const framesToMap(startNumFrames + numPageTables + numPageDirs +
+                                  numPageDirPtrs + 1);
+
+            u64 const oldNumPageTables(numPageTables);
+            u64 const oldNumPageDirs(numPageDirs);
+            u64 const oldNumPageDirPtrs(numPageDirPtrs);
+
+            // Re-compute the number of tables that we would need to map all the
+            // frames + all the tables themselves.
+            numPageTables = ceil(framesToMap, 512);
+            numPageDirs = ceil(numPageTables, 512);
+            numPageDirPtrs = ceil(numPageDirs, 512);
+
+            // Did we need to allocate >= 1 more tables? If so we should
+            // recompute.
+            pagingStructureChanged = (numPageTables != oldNumPageTables) ||
+                                     (numPageDirs != oldNumPageDirs) ||
+                                     (numPageDirPtrs != oldNumPageDirPtrs);
+        }
+
+        // Don't forget the PML4 hence +1.
+        u64 const newNumFrames(startNumFrames + numPageTables + numPageDirs +
+                               numPageDirPtrs + 1);
+        m_physicalMemorySize = newNumFrames * PAGE_SIZE;
     }
 
     // Allocate the guest's physical memory.
@@ -153,7 +197,7 @@ void Vm::loadCode(Code const& code) {
     // Set RSP to point after the end of physical memory that is usable (meaning
     // that we don't use the extra allocated memory as it potentially contains
     // sensitive data like page tables).
-    regs.rsp = m_extraMemoryOffset;
+    regs.rsp = m_requestedMemorySize;
     setRegisters(regs);
 
     // The KVM is now runnable.
@@ -636,8 +680,7 @@ u64 Vm::createIdentityMapping() {
                 // allocated. If the key is not present in the map then we have
                 // no way to know at which address we should read/write from/to
                 // on the host to manipulate it.
-                assert(guestToHost.contains(guestOffset));
-                map(pAddr, guestToHost[guestOffset], level - 1);
+                map(pAddr, guestToHost.at(guestOffset), level - 1);
             }
         }
     });
@@ -650,12 +693,8 @@ u64 Vm::createIdentityMapping() {
     u64 const guestPml4(std::get<1>(pml4Alloc));
     assert(!(guestPml4 % PAGE_SIZE));
 
-    // Map each physical frame. Note: For now we only ID map the amount of
-    // memory that was requested when creating the VM. We do not ID map the
-    // extra physical memory allocated for page tables. The reason: ID mapping
-    // the page tables themselves might require too much memory if the physical
-    // address space is too big.
-    for (u64 offset(0); offset < m_extraMemoryOffset; offset += PAGE_SIZE) {
+    // Map each physical frame.
+    for (u64 offset(0); offset < m_physicalMemorySize; offset += PAGE_SIZE) {
         map(offset, hostPml4, 4);
     }
     return guestPml4;
