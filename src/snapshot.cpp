@@ -32,16 +32,15 @@ public:
     // initialized to the content of the memory in range [offset; offest + size]
     // Note: Attempting to read outside of the memory boundaries reads only
     // zeroes.
-    std::unique_ptr<u8> read(u64 const offset, u64 const size) const {
-        std::unique_ptr<u8> buf(new u8[size]);
-        std::memset(buf.get(), 0, size);
+    std::vector<u8> read(u64 const offset, u64 const size) const {
+        std::vector<u8> buf(size, 0);
         if (offset >= m_memSize) {
             // Nothing to read.
             return buf;
         }
 
         u64 const toRead(std::min(size, m_memSize - offset));
-        m_root->read(buf.get(), offset, toRead);
+        m_root->read(buf.data(), offset, toRead);
         return buf;
     }
 
@@ -283,8 +282,139 @@ Snapshot::Registers const& Snapshot::registers() const {
     return m_regs;
 }
 
-std::unique_ptr<u8> Snapshot::readPhysicalMemory(u64 const offset,
-                                                 u64 const size) const {
+std::vector<u8> Snapshot::readPhysicalMemory(u64 const offset,
+                                             u64 const size) const {
     return m_blockTree->read(offset, size);
+}
+
+// A entry in a page table. The beauty of X86_64 is that all level are sharing
+// the same entry layout.
+struct Entry {
+    bool present : 1;
+    bool writable : 1;
+    bool userpage : 1;
+    bool writeThrough : 1;
+    bool cacheDisable : 1;
+    bool accessed : 1;
+    bool dirty : 1;
+    bool pat : 1;
+    bool global : 1;
+    u16 : 3;
+    // Technically the offset is not 52 bits but ~48 bits. That's fine, the
+    // unused bits are 0 anyway (I think!).
+    u64 next : 52;
+
+    u64 nextTableOffset() const {
+        return next << 12;
+    }
+} __attribute__((packed));
+
+// Return type of the map<>() function below mapping a linear address to a
+// physical offset. This is some sort of option which either contains the
+// corresponding physical offset or an "invalid" address.
+class MapResult {
+public:
+    // Construct a MapResult that contains a valid mapping.
+    // @param phyAddr: The corresponding physical offset to the linear address
+    // that was mapped.
+    MapResult(u64 const phyOff) : m_isMapped(true), m_physicalOffset(phyOff) {}
+
+    // Construct a MapResult that does not contain a mapping, e.g. the linear
+    // address was not mapped to physical memory.
+    MapResult() : m_isMapped(false), m_physicalOffset(0) {}
+
+    // Check if this value contains a valid mapping.
+    // @return: true if the linear address mapped to a physical offset, in which
+    // case that physical offset can be retreived with physicalOffset. false if
+    // the linear address is not mapped to physical memory.
+    operator bool() const {
+        return m_isMapped;
+    }
+
+    // Get the physical offset of the mapping. Must only be called when the
+    // operator bool returns true, e.g. when a mapping exists.
+    u64 physicalOffset() const {
+        assert(m_isMapped);
+        return m_physicalOffset;
+    }
+
+private:
+    bool const m_isMapped;
+    u64 const m_physicalOffset;
+};
+
+// Walk the page table to map a linear address to its corresponding physical
+// address.
+// @template L: The page table level at which we currently are.
+// @param mem: The physical memory.
+// @param tableOffset: The physical offset of the table to walk next.
+// @param lAddr: The linear address to map.
+// @return: The physical address to which `lAddr` is mapped to.
+template<u64 L>
+MapResult map(BlockTree const& mem, u64 const tableOffset, u64 const lAddr) {
+    // Compute the bits that are used to index the current table of level L.
+    u64 const mask(0b111111111);
+    u64 const entryIdx((lAddr >> (12 + (L - 1) * 9)) & mask);
+    u64 const entryOffset(tableOffset + entryIdx * sizeof(Entry));
+    // Read the entry from the table.
+    std::vector<u8> const raw(mem.read(entryOffset, sizeof(Entry)));
+    Entry const * const entry(reinterpret_cast<Entry const*>(raw.data()));
+    if (entry->present) {
+        // Recurse on the next table.
+        return map<L-1>(mem, entry->nextTableOffset(), lAddr);
+    } else {
+        // The linear address is not mapped. Return an invalid address.
+        return MapResult();
+    }
+}
+
+// Specialization of map<>() for level 0, e.g. a physical frame. This is the
+// base case of the recursion.
+template<>
+MapResult map<0>(BlockTree const& mem __attribute__((unused)),
+               u64 const frameOffset,
+               u64 const lAddr) {
+    // Sanity check that the address is page aligned.
+    u64 const pageOffsetMask((1ULL << 12) - 1);
+    assert(!(frameOffset & pageOffsetMask));
+    u64 const pAddr(frameOffset | (lAddr & pageOffsetMask));
+    return pAddr;
+}
+
+std::vector<u8> Snapshot::readLinearMemory(u64 const offset,
+                                           u64 const size) const {
+    // When reading linear memory we need to read page by page since they might
+    // not be continous in physical memory.
+    u64 const startPageIdx(offset >> 12);
+    u64 const endPageIdx((offset + size - 1) >> 12);
+    u64 const pml4Offset(m_regs.cr3 & ~((1 << 12) - 1));
+    // The resulting buffer to return.
+    std::vector<u8> result;
+    for (u64 i(startPageIdx); i <= endPageIdx; ++i) {
+        u64 const readStartLinOffset(std::max(offset, i * PAGE_SIZE));
+        u64 const readEndLinOffset(std::min(offset + size, (i+1) * PAGE_SIZE));
+        u64 const readLen(readEndLinOffset - readStartLinOffset);
+
+        // Map the linear address to read from.
+        MapResult const mapRes(map<4>(*m_blockTree.get(),
+                                      pml4Offset,
+                                      readStartLinOffset));
+        if (mapRes) {
+            // The linear address is mapped to physical memory. Read the
+            // associated physical memory and append to the result buffer.
+            u64 const readOff(mapRes.physicalOffset());
+            // Read data for this page from physical memory.
+            std::vector<u8> const data(m_blockTree->read(readOff, readLen));
+            // Copy over the data in destination buffer.
+            result.insert(result.end(), data.begin(), data.end());
+        } else {
+            // When the linear address is not mapped, we stop here. We can't
+            // possibly go to the next page because then the caller would see
+            // continous data that is not continuous in the linear address
+            // space.
+            break;
+        }
+    }
+    return result;
 }
 }

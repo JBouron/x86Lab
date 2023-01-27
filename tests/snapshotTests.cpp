@@ -122,9 +122,49 @@ DECLARE_TEST(testBasicSnapshots) {
             TEST_ASSERT(!currSnap->hasBase());
         }
         TEST_ASSERT(currSnap->registers() == regsHistory[i]);
-        std::unique_ptr<u8> currMem(currSnap->readPhysicalMemory(0, memSize));
-        TEST_ASSERT(!std::memcmp(currMem.get(), memHistory[i].get(), memSize));
+        std::vector<u8> const currMem(currSnap->readPhysicalMemory(0, memSize));
+        TEST_ASSERT(!std::memcmp(currMem.data(), memHistory[i].get(), memSize));
         currSnap = currSnap->base();
     }
+}
+
+// Test the readLinearMemory method of Snapshot.
+DECLARE_TEST(testReadLinearMemory) {
+    // This is a somewhat hacky test: we create a VM in long mode so that it
+    // gets page tables allocated an set-up. Those page tables form an identity
+    // map over the entire VM's physical memory.
+    // We then write random data over the VM's physical memory, while being
+    // careful not to overwrite the page table.
+    // Then we create a Snapshot of this random memory state, we then check that
+    // reading from physical or linear memory returns the same thing (due to
+    // identity mapping).
+    u64 const memSize(4 * X86Lab::PAGE_SIZE);
+    // Start the VM in long mode so paging is enabled.
+    X86Lab::Vm::CpuMode const startMode(X86Lab::Vm::CpuMode::LongMode);
+    std::unique_ptr<X86Lab::Vm> vm(new X86Lab::Vm(startMode, memSize));
+    std::unique_ptr<X86Lab::Vm::State> state(vm->getState());
+
+    X86Lab::Vm::State::Memory const& memory(state->memory());
+
+    // Fill the first memSize bytes of the memory with random stuff. This does
+    // not touch the page tables since those are allocated after `memSize`
+    // bytes.
+    std::mt19937_64 generator;
+    u64 * const rawPtr(reinterpret_cast<u64*>(memory.data.get()));
+    for (u64 i(0); i < memSize / sizeof(u64); ++i) {
+        rawPtr[i] = generator();
+    }
+
+    // Now create a snapshot of the state.
+    X86Lab::Snapshot const snap(std::move(state));
+
+    // Now compare reading linear and physical memory. Due to the identity
+    // mapping we should read the same thing in both.
+    // /!\ memory.size != memSize here because of the additional physical frames
+    // allocated for the page tables.
+    u64 const size(memory.size);
+    std::vector<u8> const phyMem(snap.readPhysicalMemory(0, size));
+    std::vector<u8> const linMem(snap.readLinearMemory(0, size));
+    TEST_ASSERT(phyMem == linMem);
 }
 }

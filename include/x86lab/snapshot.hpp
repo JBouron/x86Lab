@@ -46,9 +46,22 @@ public:
     // physical memory's boundary leads to reading zeroes.
     // @param offset: The offset to read from.
     // @param size: The number of bytes to read.
-    std::unique_ptr<u8> readPhysicalMemory(u64 const offset,
-                                           u64 const size) const;
+    // @return: A vector of the data in physical memory starting at `offset`
+    // spanning `size` bytes.
+    std::vector<u8> readPhysicalMemory(u64 const offset, u64 const size) const;
 
+    // Read from the snapshot of the VM's linear memory. If the entire requested
+    // range is not mapped to physical memory or if the start offset `offset` is
+    // not mapped, then the resulting vector is empty. If only part of the range
+    // is mapped to physical memory, only the data for that part is returned in
+    // the resulting vector.
+    // @param offset: The linear offset to read from.
+    // @param size: The number of bytes to read.
+    // @return: A vector of the data read from the linear address space starting
+    // at offset `offset`. The size of the vector is 0 if the offset was not
+    // mapped, == size if the entire range was mapped, <= size if the range was
+    // not fully mapped.
+    std::vector<u8> readLinearMemory(u64 const offset, u64 const size) const;
 private:
     // The snapshot this snapshot is built on top of.
     std::shared_ptr<Snapshot> m_baseSnapshot;

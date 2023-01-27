@@ -353,7 +353,7 @@ void Imgui::StackWindow::updateStackFrameStartOffsets(State const& state) {
         // list".
         currFrameStartOffset = *reinterpret_cast<u64*>(
             state.snapshot()->readPhysicalMemory(
-                currFrameStartOffset, 8).get());
+                currFrameStartOffset, 8).data());
     }
 }
 
@@ -435,9 +435,9 @@ void Imgui::StackWindow::doDraw(State const& state) {
     auto const printRow([&](u32 const rowId) {
         u64 const currOffset(rowIdToOffset(rowId));
 
-        std::unique_ptr<u8> const raw(
+        std::vector<u8> const raw(
             state.snapshot()->readPhysicalMemory(currOffset, 8));
-        u64 const val(*reinterpret_cast<u64*>(raw.get()));
+        u64 const val(*reinterpret_cast<u64 const*>(raw.data()));
 
         // Start new row.
         ImGui::TableNextColumn();
@@ -1239,7 +1239,7 @@ void Imgui::MemoryWindow::doDraw(State const& state) {
         // are reading more data than needed (e.g. four lines since at this
         // granularity each line is 16 bytes instead of 64), in that case we
         // will only use the bottom 16 bytes of the read vec512.
-        vec512 const line(s->readPhysicalMemory(offset, 64).get());
+        vec512 const line(s->readPhysicalMemory(offset, 64).data());
 
         for (u32 i(0); i < numElems; ++i) {
             ImGui::TableNextColumn();
