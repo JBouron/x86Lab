@@ -34,7 +34,8 @@ static void run(Vm::CpuMode const vmStartMode, std::string const& fileName) {
 
     // Create the VM and load the code in memory.
 
-    std::shared_ptr<Vm> vm(new Vm(vmStartMode, 1));
+    // FIXME: We need a way to specify the size of the VM.
+    std::shared_ptr<Vm> vm(new Vm(vmStartMode, 4 * X86Lab::PAGE_SIZE));
     ui->log("Vm created");
     if (vmStartMode == Vm::CpuMode::ProtectedMode) {
         ui->log("VM is using 32-bit protected-mode");
