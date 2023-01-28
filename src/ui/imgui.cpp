@@ -1094,6 +1094,13 @@ Imgui::MemoryWindow::MemoryWindow() :
     });
     m_dispFormatDropdown = std::make_unique<Dropdown<DisplayFormat>>(
         "Value format:", displayFormatOpt);
+
+    static std::map<AddressSpace, std::string> const addrSpaceOpt({
+        {AddressSpace::Physical, "Physical"},
+        {AddressSpace::Linear, "Linear"},
+    });
+    m_addressSpaceDropdown = std::make_unique<Dropdown<AddressSpace>>(
+        "Address space:", addrSpaceOpt);
 }
 
 void Imgui::MemoryWindow::doDraw(State const& state) {
@@ -1150,7 +1157,12 @@ void Imgui::MemoryWindow::doDraw(State const& state) {
     // Second widget: The table showing the memory dump.
     bool const isPrintingFloats(gran == Granularity::Float ||
                                 gran == Granularity::Double);
-    // First show the dropdowns. The value format dropdown is only shown if the
+    // First show the dropdowns.
+    // Dropdown for address space selection.
+    ImGui::SameLine();
+    m_addressSpaceDropdown->draw();
+    m_addressSpace = m_addressSpaceDropdown->selection();
+    // The value format dropdown is only shown if the
     // granularity is set to something other than Double and Float, because in
     // those two cases the format is implicitely set to FloatingPoint.
     ImGui::SameLine();
@@ -1240,56 +1252,77 @@ void Imgui::MemoryWindow::doDraw(State const& state) {
         ImGui::Text("0x%016lx", offset);
         ImGui::PopStyleColor();
 
-        // We can use a vector register here so that reading elements from a
-        // line of memory is easy. Note that in the case of Byte granularity we
-        // are reading more data than needed (e.g. four lines since at this
-        // granularity each line is 16 bytes instead of 64), in that case we
-        // will only use the bottom 16 bytes of the read vec512.
-        vec512 const line(s->readPhysicalMemory(offset, 64).data());
-
-        for (u32 i(0); i < numElems; ++i) {
-            ImGui::TableNextColumn();
-            switch (gran) {
-                case Granularity::Byte:
-                    ImGui::Text(fmt, line.template elem<u8>(i));
-                    break;
-                case Granularity::Word:
-                    ImGui::Text(fmt, line.template elem<u16>(i));
-                    break;
-                case Granularity::Dword:
-                    ImGui::Text(fmt, line.template elem<u32>(i));
-                    break;
-                case Granularity::Qword:
-                    ImGui::Text(fmt, line.template elem<u64>(i));
-                    break;
-                case Granularity::Float:
-                    ImGui::Text(fmt, line.template elem<float>(i));
-                    break;
-                case Granularity::Double:
-                    ImGui::Text(fmt, line.template elem<double>(i));
-                    break;
-                default:
-                    throw std::runtime_error("Invalid granularity");
-            }
-        }
-
-        // ASCII repr.
-        if (showingAscii) {
-            ImGui::TableNextColumn();
-            asciiColPosX = ImGui::GetCursorScreenPos().x;
-            for (u32 i(0); i < bytesPerLine; ++i) {
-                // Replace non-printable char by a darkened "." char.
-                char const ch(line.elem<u8>(i));
-                if (std::isprint(ch)) {
-                    ImGui::Text("%c ", ch);
-                } else {
-                    ImGui::PushStyleColor(ImGuiCol_Text, nonPrintColor);
-                    ImGui::Text(". ");
-                    ImGui::PopStyleColor();
+        // Read a line of memory (64 bytes) in the current address space
+        // m_addressSpace.
+        // @param offset: The offset to read from.
+        // @return: A vector<u8> containing the content of the memory at offset
+        // `offset`.
+        auto const readMemLine([&](u64 const offset) {
+            switch (m_addressSpace) {
+                case AddressSpace::Physical:
+                    return s->readPhysicalMemory(offset, 64);
+                case AddressSpace::Linear: {
+                    return s->readLinearMemory(offset, 64);
                 }
-                // Cancel-out the newline from the previous ImGui::Text(), next
-                // char is immediately following the previous one.
-                ImGui::SameLine(0, 0);
+            }
+        });
+
+        std::vector<u8> const lineData(readMemLine(offset));
+        if (!!lineData.size()) {
+            assert(lineData.size() >= bytesPerLine);
+            vec512 const line(lineData.data());
+            for (u32 i(0); i < numElems; ++i) {
+                ImGui::TableNextColumn();
+                switch (gran) {
+                    case Granularity::Byte:
+                        ImGui::Text(fmt, line.template elem<u8>(i));
+                        break;
+                    case Granularity::Word:
+                        ImGui::Text(fmt, line.template elem<u16>(i));
+                        break;
+                    case Granularity::Dword:
+                        ImGui::Text(fmt, line.template elem<u32>(i));
+                        break;
+                    case Granularity::Qword:
+                        ImGui::Text(fmt, line.template elem<u64>(i));
+                        break;
+                    case Granularity::Float:
+                        ImGui::Text(fmt, line.template elem<float>(i));
+                        break;
+                    case Granularity::Double:
+                        ImGui::Text(fmt, line.template elem<double>(i));
+                        break;
+                    default:
+                        throw std::runtime_error("Invalid granularity");
+                }
+            }
+
+            // ASCII repr.
+            if (showingAscii) {
+                ImGui::TableNextColumn();
+                asciiColPosX = ImGui::GetCursorScreenPos().x;
+                for (u32 i(0); i < bytesPerLine; ++i) {
+                    // Replace non-printable char by a darkened "." char.
+                    char const ch(line.elem<u8>(i));
+                    if (std::isprint(ch)) {
+                        ImGui::Text("%c ", ch);
+                    } else {
+                        ImGui::PushStyleColor(ImGuiCol_Text, nonPrintColor);
+                        ImGui::Text(". ");
+                        ImGui::PopStyleColor();
+                    }
+                    // Cancel-out the newline from the previous ImGui::Text(), next
+                    // char is immediately following the previous one.
+                    ImGui::SameLine(0, 0);
+                }
+            }
+        } else {
+            // We only end up in this situation if we are in Linear address mode
+            // and the memory is not mapped. In that case we display X's in all
+            // colums.
+            for (u32 i(0); i < numCols - 1; ++i) {
+                ImGui::TableNextColumn();
+                ImGui::Text("X");
             }
         }
     });

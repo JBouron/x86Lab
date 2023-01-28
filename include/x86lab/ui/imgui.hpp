@@ -334,7 +334,7 @@ private:
     public:
         MemoryWindow();
     private:
-        static constexpr char const * defaultTitle = "Physical Memory";
+        static constexpr char const * defaultTitle = "Memory";
 
         static constexpr ImGuiWindowFlags windowFlags = 
             Imgui::defaultWindowFlags |
@@ -351,12 +351,22 @@ private:
         // The dropdown used to select the display format of the values of
         // memory.
         std::unique_ptr<Dropdown<DisplayFormat>> m_dispFormatDropdown;
+
+        enum class AddressSpace {
+            Physical,
+            Linear,
+        };
+        // The dropdown used to select which address space is shown in the
+        // memory window.
+        std::unique_ptr<Dropdown<AddressSpace>> m_addressSpaceDropdown;
+        // The current address space shown in the window.
+        AddressSpace m_addressSpace;
         // Legend for the focus address input field.
         static constexpr char const * inputFieldText = "Jump to 0x";
         // The number of lines to show in the memory dump. FIXME: This really
         // shouldn't be hardcoded. Since we are using a clipper we can get away
         // with showing the entire physical memory.
-        static constexpr u64 dumpNumLines = 1000;
+        static constexpr u64 dumpNumLines = 5000;
 
         // Color of the addresses in the table.
         static constexpr ImVec4 addrColor = ImVec4(0.35f, 0.35f, 0.35f, 1.0f);
