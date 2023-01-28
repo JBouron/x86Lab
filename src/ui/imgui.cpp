@@ -351,9 +351,15 @@ void Imgui::StackWindow::updateStackFrameStartOffsets(State const& state) {
 
         // Move to next stack frame, follow the saved RBP "linked
         // list".
-        currFrameStartOffset = *reinterpret_cast<u64*>(
-            state.snapshot()->readPhysicalMemory(
-                currFrameStartOffset, 8).data());
+        std::vector<u8> const rawRbp(state.snapshot()->readLinearMemory(
+            currFrameStartOffset, sizeof(currFrameStartOffset)));
+        if (rawRbp.size() != sizeof(currFrameStartOffset)) {
+            // The read returned a partial buffer (or even empty). This means
+            // that the linear address currFrameStartOffset is not mapped to
+            // physical memory, we cannot go up the stack frames anymore.
+            return;
+        }
+        currFrameStartOffset = *reinterpret_cast<u64 const*>(rawRbp.data());
     }
 }
 
