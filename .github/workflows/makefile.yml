@@ -14,8 +14,11 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
+    - name: Update docker image
+      run: apt-get -y update && apt-get -y upgrade
+      
     - name: Install dependencies
-      run: sudo apt install nasm libsdl2-dev
+      run: sudo apt install -y nasm libsdl2-dev
 
     - name: Compile
       run: make
