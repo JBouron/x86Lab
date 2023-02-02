@@ -627,6 +627,7 @@ u64 Vm::createIdentityMapping() {
         assert(allocOffset < m_physicalMemorySize);
         void * const hostAddr(static_cast<u8*>(m_memory) + allocOffset);
         numTablesAlloc++;
+        std::memset(hostAddr, 0, PAGE_SIZE);
         return std::make_pair(hostAddr, allocOffset);
     });
 
