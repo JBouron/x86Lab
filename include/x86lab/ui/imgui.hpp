@@ -216,7 +216,7 @@ private:
         // The stack window prints separators to identify stack frames.
         // The color of the stack frame separators.
         static constexpr ImVec4 frameSeparatorColor =
-            ImVec4(0.35f, 0.35f, 0.35f, 1.0f);
+            ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
         // The thickness of the stack frame separators.
         static constexpr float frameSeparatorThickness = 1.0f;
 
@@ -226,7 +226,7 @@ private:
         static constexpr u64 maxHistory = 1000;
 
         // Color of the addresses in the table.
-        static constexpr ImVec4 addrColor = ImVec4(0.35f, 0.35f, 0.35f, 1.0f);
+        static constexpr ImVec4 addrColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
 
         // Keep track of the start offset of the last maxHistory stack frames.
         // Re-computed everytime the state of the VM changes. This set is meant
@@ -373,7 +373,7 @@ private:
         static constexpr u64 dumpNumLines = 5000;
 
         // Color of the addresses in the table.
-        static constexpr ImVec4 addrColor = ImVec4(0.35f, 0.35f, 0.35f, 1.0f);
+        static constexpr ImVec4 addrColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
         // Color of the non-printable chars in the ASCII format.
         static constexpr ImVec4 nonPrintColor = addrColor;
         // Color of the separator between the memory content and the ASCII

@@ -382,7 +382,9 @@ void Imgui::StackWindow::doDraw(State const& state) {
     // setting ScrollY on a table leads to the scroll bar overlapping with the
     // content of the table, but only when the scroll bar is towards the bottom
     // of the table.
-    ImGuiTableFlags const tableFlags(ImGuiTableFlags_ScrollY |
+    ImGuiTableFlags const tableFlags(ImGuiTableFlags_BordersOuter |
+                                     ImGuiTableFlags_RowBg |
+                                     ImGuiTableFlags_ScrollY |
                                      ImGuiTableFlags_ScrollX |
                                      ImGuiTableFlags_SizingFixedFit |
                                      ImGuiTableFlags_BordersInnerV);
@@ -947,7 +949,8 @@ void Imgui::CpuStateWindow::doDrawFpuMmx(State const& state) {
     // granularity.
     u32 const numCols(1 + numElemForGran);
 
-    ImGuiTableFlags const tableFlags(ImGuiTableFlags_ScrollX |
+    ImGuiTableFlags const tableFlags(ImGuiTableFlags_BordersOuter |
+                                     ImGuiTableFlags_ScrollX |
                                      ImGuiTableFlags_ScrollY |
                                      ImGuiTableFlags_BordersInnerV);
     ImGuiTableColumnFlags const colFlags(ImGuiTableColumnFlags_WidthFixed);
@@ -1110,8 +1113,7 @@ struct Entry {
 static_assert(sizeof(Entry) == sizeof(uint64_t));
 
 void Imgui::CpuStateWindow::doDrawPageTables(State const& state) {
-    ImGuiTableFlags const tableFlags(ImGuiTableFlags_BordersOuterV |
-                                     ImGuiTableFlags_BordersOuterH |
+    ImGuiTableFlags const tableFlags(ImGuiTableFlags_BordersOuter |
                                      ImGuiTableFlags_RowBg |
                                      ImGuiTableFlags_ScrollX |
                                      ImGuiTableFlags_ScrollY |
@@ -1434,7 +1436,9 @@ void Imgui::MemoryWindow::doDraw(State const& state) {
         m_dispFormatDropdown->draw();
     }
 
-    ImGuiTableFlags const tableFlags(ImGuiTableFlags_ScrollY |
+    ImGuiTableFlags const tableFlags(ImGuiTableFlags_BordersOuter |
+                                     ImGuiTableFlags_RowBg |
+                                     ImGuiTableFlags_ScrollY |
                                      ImGuiTableFlags_ScrollX |
                                      ImGuiTableFlags_SizingFixedFit);
     ImGuiTableColumnFlags const colFlags(ImGuiTableColumnFlags_WidthFixed);
@@ -1606,7 +1610,7 @@ void Imgui::MemoryWindow::doDraw(State const& state) {
     float const paddingX(style.CellPadding.x);
     float const paddingY(style.CellPadding.y);
     float const addrColWidth(ImGui::CalcTextSize("0x0000000000000000").x +
-        paddingX);
+        paddingX * 2);
 
     // The separator spans all displayed rows of the table, excepted the
     // first header row. Use some padding to make it pretty.
