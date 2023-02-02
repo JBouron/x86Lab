@@ -295,6 +295,9 @@ private:
         // The color of "old" register values in the history list.
         static constexpr ImVec4 oldValColor = ImVec4(0.35f, 0.35f, 0.35f, 1.0f);
 
+        // The color of unmapped page table entries in the page table tab.
+        static constexpr ImVec4 unmappedColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
+
         // Draw the columns for each element of a vector register in the given
         // granularity. This function assumes that we are currently drawing a
         // table (e.g. between BeginTable and EndTable calls) and calls
@@ -315,6 +318,8 @@ private:
         void doDrawFpuMmx(State const& state);
         // Draw the tab showing SSE & AVX registers.
         void doDrawSseAvx(State const& state);
+
+        void doDrawPageTables(State const& state);
 
         // The dropdown used to select the display format of general purpose
         // registers.

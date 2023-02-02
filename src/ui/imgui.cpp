@@ -4,6 +4,8 @@
 #include <iomanip>
 #include <cmath>
 #include <algorithm>
+#include <span>
+#include <functional>
 
 namespace X86Lab::Ui {
 
@@ -627,6 +629,11 @@ void Imgui::RegisterWindow::doDraw(State const& state) {
         ImGui::EndTabItem();
     }
 
+    if (ImGui::BeginTabItem("Page tables", NULL, 0)) {
+        doDrawPageTables(state);
+        ImGui::EndTabItem();
+    }
+
     ImGui::EndTabBar();
 }
 
@@ -1071,6 +1078,261 @@ void Imgui::RegisterWindow::doDrawSseAvx(State const& state) {
         }
         ImGui::PopStyleColor();
     }
+    ImGui::EndTable();
+}
+
+struct Entry {
+    union {
+        struct {
+            bool present : 1;
+            bool writable : 1;
+            bool userpage : 1;
+            bool writeThrough : 1;
+            bool cacheDisable : 1;
+            bool accessed : 1;
+            bool dirty : 1;
+            bool pat : 1;
+            bool global : 1;
+            u16 : 3;
+            // Technically the offset is not 51 bits but ~48 bits. That's fine,
+            // the unused bits are 0 anyway (I think!).
+            u64 next : 51;
+            bool executeDisable : 1;
+        } __attribute__((packed));
+        // The raw value of the entry.
+        uint64_t raw;
+    } __attribute__((packed));
+
+    u64 nextTableOffset() const {
+        return next << 12;
+    }
+} __attribute__((packed));
+static_assert(sizeof(Entry) == sizeof(uint64_t));
+
+void Imgui::RegisterWindow::doDrawPageTables(State const& state) {
+    ImGuiTableFlags const tableFlags(ImGuiTableFlags_BordersOuterV |
+                                     ImGuiTableFlags_BordersOuterH |
+                                     ImGuiTableFlags_RowBg |
+                                     ImGuiTableFlags_ScrollX |
+                                     ImGuiTableFlags_ScrollY |
+                                     ImGuiTableFlags_SizingFixedFit |
+                                     ImGuiTableFlags_BordersInnerV);
+    // Entry desc | L addr start | L addr end | P addr start | <attrs ...>
+    // The attributes are the various bits of the mapping, which add the
+    // following cols: XD | G | PAT | D | A | PCD | PWT | U/S | R/W | Entry raw
+    // The present bit is implicitly implied.
+    if (!ImGui::BeginTable("##pagetable", 14, tableFlags)) {
+        return;
+    }
+
+    ImGuiTableColumnFlags const colFlags(ImGuiTableColumnFlags_WidthFixed);
+    ImGui::TableSetupScrollFreeze(0, 1);
+    ImGui::TableSetupColumn("Entry", colFlags);
+    ImGui::TableSetupColumn("Start linear addr.", colFlags);
+    ImGui::TableSetupColumn("End linear addr.", colFlags);
+    ImGui::TableSetupColumn("Mapped phy. addr.", colFlags);
+    ImGui::TableSetupColumn("ExD", colFlags);
+    ImGui::TableSetupColumn(" G ", colFlags);
+    ImGui::TableSetupColumn("PAT", colFlags);
+    ImGui::TableSetupColumn(" D ", colFlags);
+    ImGui::TableSetupColumn(" A ", colFlags);
+    ImGui::TableSetupColumn("PCD", colFlags);
+    ImGui::TableSetupColumn("PWT", colFlags);
+    ImGui::TableSetupColumn("U/S", colFlags);
+    ImGui::TableSetupColumn("R/W", colFlags);
+    ImGui::TableSetupColumn("Entry raw value", colFlags);
+    ImGui::TableHeadersRow();
+
+    // Compute the canonical form of an address.
+    // @param addr: The address to canonicalize.
+    // @return: The canonical form of `addr` where bits 48 ... 63 are set to the
+    // same value of bit 47.
+    // FIXME: We assume that the guest is using 48-bit virtual addresses here.
+    // We should compute that instead.
+    auto const canonicalize([](u64 const addr) {
+        u64 const mask(~0ULL << 48);
+        if (addr & (1ULL << 47)) {
+            return addr | mask;
+        } else {
+            return addr & ~mask;
+        }
+    });
+
+    // Get the name of particular level of page table.
+    auto const nameForLevel([](u64 const L) {
+        assert(0 <= L && L < 4);
+        switch (L) {
+            case 0:
+                return std::string("Page Frame");
+            case 1:
+                return std::string("Page Table");
+            case 2:
+                return std::string("Page Dir");
+            case 3:
+                return std::string("Page Dir Ptr");
+            default:
+                throw std::runtime_error("Invalid level");
+        }
+    });
+
+    // Get the name of an entry of a particular page table level.
+    auto const entryNameForLevel([](u64 const L) {
+        assert(0 < L && L <= 4);
+        switch (L) {
+            case 1:
+                return std::string("PTE");
+            case 2:
+                return std::string("PDE");
+            case 3:
+                return std::string("PDPTE");
+            case 4:
+                return std::string("PML4E");
+            default:
+                throw std::runtime_error("Invalid level");
+        }
+    });
+
+    std::shared_ptr<X86Lab::Snapshot const> const s(state.snapshot());
+
+    // Print the page tables recursively.
+    // @param L: The level of the page table to be printed, 4 corresponds to a
+    // PML4, 3 to a PDP, ...
+    // @param tablePhyAddr: The physical address of the page table to be
+    // printed. This is where the entries are read from.
+    // @param tableStartLinAddr: The smallest linear address covered by this
+    // table.
+    std::function<void(u64, u64, u64)> printTables;
+    printTables = [&](u64 const L,
+                      u64 const tablePhyAddr,
+                      u64 const tableStartLinAddr) {
+        // FIXME: This is assuming 64-bit paging.
+        static constexpr u64 entriesPerTable(512);
+        static constexpr u64 tableSize(PAGE_SIZE);
+
+        // Read the page table into a std::span of Entry.
+        std::vector<u8> const bytes(s->readPhysicalMemory(tablePhyAddr,
+                                                          tableSize));
+        Entry const * const raw(reinterpret_cast<Entry const*>(bytes.data()));
+        std::span<Entry const> const entries(raw, entriesPerTable);
+
+        // Print the entries of this table, one per row. If this is anything
+        // higher than a page-table (e.g. L > 1) then each entry can be opened
+        // to reveal nested tables.
+        for (u64 i(0); i < entriesPerTable; ++i) {
+            Entry const& entry(entries[i]);
+
+            // When not present the entire row gets darkened.
+            if (!entry.present) {
+                ImGui::PushStyleColor(ImGuiCol_Text, unmappedColor);
+            }
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+
+            // Column 1: Entry name + next table physical address. For entries
+            // of a page-table we don't print the physical address as it will be
+            // printed in its own column.
+            std::ostringstream oss;
+            oss << entryNameForLevel(L) << " " << i << ": ";
+            oss << nameForLevel(L - 1);
+            if (L > 1) {
+                oss << " @ 0x" << std::hex << entry.nextTableOffset();
+            }
+            // Page frames and entries that are not present are considered leaf
+            // nodes.
+            ImGuiTreeNodeFlags const flags(ImGuiTreeNodeFlags_SpanFullWidth |
+                ((L == 1 || !entry.present) ? ImGuiTreeNodeFlags_Leaf : 0));
+            bool const opened(ImGui::TreeNodeEx(oss.str().c_str(), flags));
+
+            // Column 2: Start linear address.
+            // The amount of memory this entry is spanning over. This is
+            // essentially PAGE_SIZE * (pow(512, L-1)). To avoid using floating
+            // point we convert the pow to shifthing: pow(512, L-1) ==
+            // pow(1<<9,L-1) == 1 << (9*L-1).
+            u64 const entrySpan(PAGE_SIZE * (1 << (9 * (L - 1))));
+            u64 const entryStartLinAddr(
+                canonicalize(tableStartLinAddr + i * entrySpan));
+            ImGui::TableNextColumn();
+            ImGui::Text("0x%016lx", entryStartLinAddr);
+
+            // Column 4: End linear address.
+            u64 const entryEndLinAddr(entryStartLinAddr + entrySpan - 1);
+            ImGui::TableNextColumn();
+            ImGui::Text("0x%016lx", entryEndLinAddr);
+
+            // Column 5: Mapped physical address, only for the lower level, e.g.
+            // page table level.
+            if (L == 1 && entry.present) {
+                u64 const mappedPhyAddr(entry.nextTableOffset());
+                ImGui::TableNextColumn();
+                ImGui::Text("0x%016lx", mappedPhyAddr);
+            } else {
+                // Entries are are not present and entries corresponding to
+                // anything other than a page frames do not have a mapped
+                // physical address.
+                ImGui::TableNextColumn();
+                if (L > 1) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, unmappedColor);
+                    ImGui::Text("--");
+                    ImGui::PopStyleColor();
+                } else {
+                    ImGui::Text("--");
+                }
+            }
+
+            // Remaining columns: attributes.
+            // G | PAT | D | A | PCD | PWT | U/S | R/W
+            // Helper macro to print attribute values.
+            #define PRINT_ATTRIBUTE(attrName) \
+                do { \
+                    ImGui::TableNextColumn(); \
+                    if (entry.attrName) { \
+                        ImGui::TextUnformatted(" 1 "); \
+                    } else { \
+                        ImGui::PushStyleColor(ImGuiCol_Text, unmappedColor); \
+                        ImGui::TextUnformatted(" 0 "); \
+                        ImGui::PopStyleColor(); \
+                    } \
+                } while(0)
+            PRINT_ATTRIBUTE(executeDisable);
+            PRINT_ATTRIBUTE(global);
+            PRINT_ATTRIBUTE(pat);
+            PRINT_ATTRIBUTE(dirty);
+            PRINT_ATTRIBUTE(accessed);
+            PRINT_ATTRIBUTE(cacheDisable);
+            PRINT_ATTRIBUTE(writeThrough);
+            #undef PRINT_ATTRIBUTE
+
+            // For U/S and R/W a bit would be too confusing, use chars such as:
+            //  U: Userspace and S: Supervisor
+            //  W: Writable  and R: Read-only
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(entry.userpage ? " U " : " S ");
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(entry.writable ? " W " : " R ");
+
+            // The raw 64-bit value of the entry.
+            ImGui::TableNextColumn();
+            ImGui::Text("0x%016lx", entry.raw);
+
+            // Recurse on opened nodes that are higher level than a page frame.
+            if (opened) {
+                if (L > 1 && entry.present) {
+                    printTables(L - 1, entry.nextTableOffset(),
+                                entryStartLinAddr);
+                }
+                ImGui::TreePop();
+            }
+
+            if (!entry.present) {
+                ImGui::PopStyleColor();
+            }
+        }
+    };
+
+    u64 const pml4PhyOffset(state.registers().cr3 & ~((1 << 12) - 1));
+    printTables(4, pml4PhyOffset, 0);
+
     ImGui::EndTable();
 }
 
