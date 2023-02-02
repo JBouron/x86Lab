@@ -58,7 +58,7 @@ bool Imgui::doInit() {
     // Initialize windows.
     m_codeWindow = std::make_unique<CodeWindow>();
     m_stackWindow = std::make_unique<StackWindow>();
-    m_registerWindow = std::make_unique<RegisterWindow>();
+    m_cpuStateWindow = std::make_unique<CpuStateWindow>();
     m_memoryWindow = std::make_unique<MemoryWindow>();
     return true;
 }
@@ -122,11 +122,11 @@ void Imgui::draw() {
     ImVec2 const swSize(0, codeWinSize.y * work.y);
     m_stackWinSize = m_stackWindow->draw(swPos, swSize, m_state);
 
-    // Registers window.
+    // Cpu state window.
     assert(!!m_stackWinSize.x && !!m_stackWinSize.y);
     ImVec2 const rwPos(stackWinPos.x * work.x + m_stackWinSize.x,stackWinPos.y);
     ImVec2 const rwSize(work.x - rwPos.x, m_stackWinSize.y);
-    m_registerWindow->draw(rwPos, rwSize, m_state);
+    m_cpuStateWindow->draw(rwPos, rwSize, m_state);
 
     // Memory window.
     ImVec2 const mwPos(memWinPos.x * work.x, memWinPos.y * work.y);
@@ -532,7 +532,7 @@ Imgui::displayFormatAndBitsToFormatString = {
     {std::make_pair(Imgui::DisplayFormat::FloatingPoint, 64), "%f"},
 };
 
-Imgui::RegisterWindow::RegisterWindow() :
+Imgui::CpuStateWindow::CpuStateWindow() :
     Window(defaultTitle, Imgui::defaultWindowFlags) {
     m_gpFormatDropdown = std::make_unique<Dropdown<DisplayFormat>>(
         "Value format:", formatToString);
@@ -578,7 +578,7 @@ Imgui::RegisterWindow::RegisterWindow() :
 }
 
 template<size_t W>
-void Imgui::RegisterWindow::drawColsForVec(vec<W> const& vec,
+void Imgui::CpuStateWindow::drawColsForVec(vec<W> const& vec,
                                            Granularity const granularity,
                                            DisplayFormat const displayFormat) {
     u32 const numElems(vec.bytes / granularityToBytes.at(granularity));
@@ -611,20 +611,20 @@ void Imgui::RegisterWindow::drawColsForVec(vec<W> const& vec,
     }
 }
 
-void Imgui::RegisterWindow::doDraw(State const& state) {
+void Imgui::CpuStateWindow::doDraw(State const& state) {
     ImGui::BeginTabBar("##tabs", 0);
 
-    if (ImGui::BeginTabItem("General Purpose", NULL, 0)) {
+    if (ImGui::BeginTabItem("General purpose regs.", NULL, 0)) {
         doDrawGeneralPurpose(state);
         ImGui::EndTabItem();
     }
 
-    if (ImGui::BeginTabItem("FPU & MMX", NULL, 0)) {
+    if (ImGui::BeginTabItem("FPU & MMX regs.", NULL, 0)) {
         doDrawFpuMmx(state);
         ImGui::EndTabItem();
     }
 
-    if (ImGui::BeginTabItem("SSE & AVX", NULL, 0)) {
+    if (ImGui::BeginTabItem("SSE & AVX regs.", NULL, 0)) {
         doDrawSseAvx(state);
         ImGui::EndTabItem();
     }
@@ -637,7 +637,7 @@ void Imgui::RegisterWindow::doDraw(State const& state) {
     ImGui::EndTabBar();
 }
 
-void Imgui::RegisterWindow::doDrawGeneralPurpose(State const& state) {
+void Imgui::CpuStateWindow::doDrawGeneralPurpose(State const& state) {
     Snapshot::Registers const& regs(state.registers());
     Snapshot::Registers const& prevRegs(state.prevRegisters());
 
@@ -935,7 +935,7 @@ void Imgui::RegisterWindow::doDrawGeneralPurpose(State const& state) {
     }
 }
 
-void Imgui::RegisterWindow::doDrawFpuMmx(State const& state) {
+void Imgui::CpuStateWindow::doDrawFpuMmx(State const& state) {
     m_mmxGranularityDropdown->draw();
     ImGui::SameLine();
     m_mmxFormatDropdown->draw();
@@ -981,7 +981,7 @@ void Imgui::RegisterWindow::doDrawFpuMmx(State const& state) {
     ImGui::EndTable();
 }
 
-void Imgui::RegisterWindow::doDrawSseAvx(State const& state) {
+void Imgui::CpuStateWindow::doDrawSseAvx(State const& state) {
     m_sseAvxGranularityDropdown->draw();
     Granularity const gran(m_sseAvxGranularityDropdown->selection());
     DisplayFormat dispFmt;
@@ -1109,7 +1109,7 @@ struct Entry {
 } __attribute__((packed));
 static_assert(sizeof(Entry) == sizeof(uint64_t));
 
-void Imgui::RegisterWindow::doDrawPageTables(State const& state) {
+void Imgui::CpuStateWindow::doDrawPageTables(State const& state) {
     ImGuiTableFlags const tableFlags(ImGuiTableFlags_BordersOuterV |
                                      ImGuiTableFlags_BordersOuterH |
                                      ImGuiTableFlags_RowBg |

@@ -281,16 +281,15 @@ private:
     static const std::map<std::pair<DisplayFormat, u8>, char const*>
         displayFormatAndBitsToFormatString;
 
-    // Show the current state of the VM's registers. Organized in multiple tabs
-    // to separate general-purpose registers and vector registers.
-    class RegisterWindow : public Window {
+    // Show the current state of the VM's cpu (registers, page tables, ...).
+    class CpuStateWindow : public Window {
     public:
-        RegisterWindow();
+        CpuStateWindow();
 
         // Toggle the next display granularity for the vector registers.
         void nextGranularity();
     private:
-        static constexpr char const * defaultTitle = "Registers";
+        static constexpr char const * defaultTitle = "Cpu state";
 
         // The color of "old" register values in the history list.
         static constexpr ImVec4 oldValColor = ImVec4(0.35f, 0.35f, 0.35f, 1.0f);
@@ -388,7 +387,7 @@ private:
     // The set of windows making up the interface of x86Lab.
     std::unique_ptr<CodeWindow> m_codeWindow;
     std::unique_ptr<StackWindow> m_stackWindow;
-    std::unique_ptr<RegisterWindow> m_registerWindow;
+    std::unique_ptr<CpuStateWindow> m_cpuStateWindow;
     std::unique_ptr<MemoryWindow> m_memoryWindow;
 };
 }
