@@ -17,9 +17,21 @@ public:
            std::shared_ptr<Code const> const code,
            std::shared_ptr<Ui::Backend> const ui);
 
-    // Run the main-loop. This function only returns once the user has requested
-    // to exit the program.
-    void run();
+    // Value returned by run() to indicate why the run() function returned.
+    enum class ReturnReason {
+        // User explicitly requested to exit the application.
+        Quit,
+        // User requested resetting the VM.
+        ResetVm,
+    };
+
+    // Run the main-loop. This can only be called once! This function only
+    // returns when this Runner is not longer runnable this happens when the
+    // user requests exiting the application or when the VM needs reset, in
+    // which case a new VM and new Runner instances must be created. See
+    // ReturnReason for other reasons.
+    // @return: The reason for the return.
+    ReturnReason run();
 
 private:
     std::shared_ptr<Vm> m_vm;

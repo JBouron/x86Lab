@@ -27,6 +27,11 @@ static void run(Vm::CpuMode const vmStartMode, std::string const& fileName) {
     // Run code in `fileName` starting directly in 64 bits mode.
     std::shared_ptr<Ui::Backend> ui(new Ui::Imgui());
 
+    // Initilize UI.
+    if (!ui->init()) {
+        throw X86Lab::Error("Cannot initialize UI", 0);
+    }
+
     // Assemble the code.
     ui->log("Assembling code in " + fileName);
     std::shared_ptr<Code> const code(new Code(fileName));
@@ -34,23 +39,31 @@ static void run(Vm::CpuMode const vmStartMode, std::string const& fileName) {
 
     // Create the VM and load the code in memory.
 
-    // FIXME: We need a way to specify the size of the VM.
-    std::shared_ptr<Vm> vm(new Vm(vmStartMode, 4 * X86Lab::PAGE_SIZE));
-    ui->log("Vm created");
-    if (vmStartMode == Vm::CpuMode::ProtectedMode) {
-        ui->log("VM is using 32-bit protected-mode");
-    } else if (vmStartMode == Vm::CpuMode::LongMode) {
-        ui->log("VM is using 64-bit long-mode");
-    } else {
-        ui->log("Vm is using 16-bit real-mode");
+    bool exitRequested(false);
+    while (!exitRequested) {
+        // When the user requests resetting the VM we simply destroy the VM and
+        // re-create it from scratch. This is much easier compared to manually
+        // resetting the state of the CPU and memory.
+
+        // FIXME: We need a way to specify the size of the VM.
+        std::shared_ptr<Vm> vm(new Vm(vmStartMode, 4 * X86Lab::PAGE_SIZE));
+        if (vmStartMode == Vm::CpuMode::ProtectedMode) {
+            ui->log("VM is using 32-bit protected-mode");
+        } else if (vmStartMode == Vm::CpuMode::LongMode) {
+            ui->log("VM is using 64-bit long-mode");
+        } else {
+            ui->log("Vm is using 16-bit real-mode");
+        }
+
+        vm->loadCode(*code);
+        ui->log("Code loaded");
+
+        // Runner instances are a bit ephemeral, as soon as their run() return
+        // they cannot be used anymore.
+        Runner runner(vm, code, ui);
+        Runner::ReturnReason const retReason(runner.run());
+        exitRequested = retReason == Runner::ReturnReason::Quit;
     }
-
-    vm->loadCode(*code);
-    ui->log("Code loaded");
-
-
-    Runner runner(vm, code, ui);
-    runner.run();
 }
 
 int main(int argc, char **argv) {

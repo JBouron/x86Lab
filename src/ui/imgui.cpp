@@ -311,6 +311,10 @@ void Imgui::ConfigBar::doDraw(State const& __attribute__((unused)) state) {
     if (ImGui::Button("[r] Reverse step")) {
         m_lastAction = Action::ReverseStep;
     }
+    ImGui::SameLine();
+    if (ImGui::Button("Reset VM")) {
+        m_lastAction = Action::Reset;
+    }
 }
 
 Imgui::CodeWindow::CodeWindow() :

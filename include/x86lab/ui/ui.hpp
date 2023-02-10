@@ -23,6 +23,8 @@ enum class Action {
     ReverseStep,
     // Terminate the process.
     Quit,
+    // Reset the VM.
+    Reset,
 };
 
 // State represent anything that needs to be displayed on the UI implementation.

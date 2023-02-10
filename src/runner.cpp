@@ -17,11 +17,7 @@ Runner::Runner(std::shared_ptr<Vm> const vm,
         std::shared_ptr<Snapshot>(new Snapshot(m_vm->getState())));
 }
 
-void Runner::run() {
-    // Initilize UI.
-    if (!m_ui->init()) {
-        throw X86Lab::Error("Cannot initialize UI", 0);
-    }
+Runner::ReturnReason Runner::run() {
     // Show the initial condition of the VM.
     updateUi();
     m_ui->log("Ready to run");
@@ -30,7 +26,12 @@ void Runner::run() {
         Ui::Action const action(m_ui->waitForNextAction());
         if (action == Ui::Action::Quit) {
             // Termination condition.
-            return;
+            return ReturnReason::Quit;
+        } else if (action == Ui::Action::Reset) {
+            // User requested resetting the VM. In this case the Runner let's
+            // the caller (e.g. main()) takes care of this. At this point this
+            // runner instance is done running and ready to be destroyed.
+            return ReturnReason::ResetVm;
         } else {
             processAction(action);
             updateUi();
