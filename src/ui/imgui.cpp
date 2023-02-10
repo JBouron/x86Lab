@@ -56,6 +56,7 @@ bool Imgui::doInit() {
     ImGui_ImplSDLRenderer_Init(m_sdlRenderer);
 
     // Initialize windows.
+    m_configBar = std::make_unique<ConfigBar>();
     m_codeWindow = std::make_unique<CodeWindow>();
     m_stackWindow = std::make_unique<StackWindow>();
     m_cpuStateWindow = std::make_unique<CpuStateWindow>();
@@ -102,36 +103,67 @@ void Imgui::doLog(std::string const& msg) {
 }
 
 void Imgui::draw() {
+    // We want to draw the following layout (not to scale):
+    // +-----------------------------+
+    // |           CONFIG            |
+    // +---------+---------+---------+
+    // |         |         |         |
+    // |         |         |         |
+    // |  CODE   |  STACK  |   REGS  |
+    // |         |         |         |
+    // |         |         |         |
+    // +---------+---------+---------+
+    // |           MEMORY            |
+    // +-----------------------------+
+    // FIXME: As of now there is no log window/pane. This is because it has been
+    // replaced by the memory window. There is not much use for a log window but
+    // in the future a dialog or pane will be added to log errors.
     ImGui_ImplSDLRenderer_NewFrame();
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
 
     ImGuiViewport const& viewport(*ImGui::GetMainViewport());
-    ImVec2 const work(viewport.WorkSize);
+    ImVec2 const vpSize(viewport.WorkSize);
+    ImVec2 const codeWinSize(ImVec2(0.25f, 0.70f));
+
+    // Config bar is at (0,0) and spans the entire width of the window. The
+    // height is computed to fit the content which is all in one line.
+    ImVec2 const configBarPos(0.0f, 0.0f);
+    ImVec2 const configBarSetupSize(vpSize.x, 0.0f);
+    ImVec2 const configBarSize(m_configBar->draw(configBarPos,
+        configBarSetupSize, m_state));
 
     // Code window
-    ImVec2 const cwPos(codeWinPos.x * work.x, codeWinPos.y * work.y);
-    ImVec2 const cwSize(codeWinSize.x * work.x, codeWinSize.y * work.y);
-    m_codeWindow->draw(cwPos, cwSize, m_state);
+    ImVec2 const codeWindowPos(0.0f, configBarPos.y + configBarSize.y);
+    ImVec2 const codeWindowSetupSize(codeWinSize.x * vpSize.x,
+        codeWinSize.y * (vpSize.y - configBarSize.y));
+    ImVec2 const codeWindowSize(m_codeWindow->draw(codeWindowPos,
+        codeWindowSetupSize, m_state));
 
     // Stack window. Must be drawn before the registers window since the
     // register window needs to know the size of the stack window to compute its
     // position.
-    ImVec2 const swPos(stackWinPos.x * work.x, stackWinPos.y * work.y);
+    ImVec2 const stackWindowPos(codeWindowPos.x + codeWindowSize.x,
+                                codeWindowPos.y);
     // Auto-size the window horizontally to fit content.
-    ImVec2 const swSize(0, codeWinSize.y * work.y);
-    m_stackWinSize = m_stackWindow->draw(swPos, swSize, m_state);
+    ImVec2 const stackWindowSetupSize(0.0f, codeWindowSize.y);
+    ImVec2 const stackWindowSize(m_stackWindow->draw(stackWindowPos,
+        stackWindowSetupSize, m_state));
 
     // Cpu state window.
-    assert(!!m_stackWinSize.x && !!m_stackWinSize.y);
-    ImVec2 const rwPos(stackWinPos.x * work.x + m_stackWinSize.x,stackWinPos.y);
-    ImVec2 const rwSize(work.x - rwPos.x, m_stackWinSize.y);
-    m_cpuStateWindow->draw(rwPos, rwSize, m_state);
+    ImVec2 const cpuStateWindowPos(stackWindowPos.x + stackWindowSize.x,
+        stackWindowPos.y);
+    ImVec2 const cpuStateWindowSetupSize(
+        vpSize.x - codeWindowSize.x - stackWindowSize.x, codeWindowSize.y);
+    ImVec2 const cpuStateWindowSize(m_cpuStateWindow->draw(cpuStateWindowPos,
+        cpuStateWindowSetupSize, m_state));
 
     // Memory window.
-    ImVec2 const mwPos(memWinPos.x * work.x, memWinPos.y * work.y);
-    ImVec2 const mwSize(memWinSize.x * work.x, memWinSize.y * work.y);
-    m_memoryWindow->draw(mwPos, mwSize, m_state);
+    ImVec2 const memoryWindowPos(0.0f,
+        cpuStateWindowPos.y + cpuStateWindowSize.y);
+    ImVec2 const memoryWindowSetupSize(vpSize.x,
+        vpSize.y - codeWindowSize.y - configBarSize.y);
+    m_memoryWindow->draw(memoryWindowPos, memoryWindowSetupSize, m_state);
 
     // FIXME: For now the log window is disabled and the memory window is taking
     // its place.
@@ -258,6 +290,13 @@ float Imgui::Dropdown<T>::childFrameWidth() {
         m_childFrameWidth = labelWidth + optionMaxWidth + buttonWidth;
     }
     return m_childFrameWidth;
+}
+
+Imgui::ConfigBar::ConfigBar() :
+    Window("Dummy", defaultFlags) {}
+
+void Imgui::ConfigBar::doDraw(State const& __attribute__((unused)) state) {
+    ImGui::Text("PLACEHOLDER");
 }
 
 Imgui::CodeWindow::CodeWindow() :

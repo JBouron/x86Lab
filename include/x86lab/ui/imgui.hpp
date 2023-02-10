@@ -38,40 +38,6 @@ private:
         ImGuiWindowFlags_NoBringToFrontOnFocus |
         ImGuiWindowFlags_NoSavedSettings;
 
-    // Position and size of all windows. Width and height of the windows are
-    // expressed as a percentage of the root window's width and height. The
-    // layout is as follows (not to scale):
-    // +---------+---------+---------+
-    // |         |         |         |
-    // |         |         |         |
-    // |  CODE   |  STACK  |   REGS  |
-    // |         |         |         |
-    // |         |         |         |
-    // +---------+---------+---------+
-    // |           MEMORY            |
-    // +-----------------------------+
-    // Code window position and size are static.
-    static constexpr ImVec2 codeWinPos = ImVec2(0.0f, 0.0f);
-    static constexpr ImVec2 codeWinSize = ImVec2(0.25f, 0.70f);
-    // Stack window position is known at compilation time (since code window
-    // size and pos are known) but its size is not known: it will be computed to
-    // fit it's content.
-    static constexpr ImVec2 stackWinPos = ImVec2(codeWinPos.x + codeWinSize.x,
-                                                 0.0f);
-    // Will be computed during drawStackWin() call. This is needed to compute
-    // the register window's position and size.
-    ImVec2 m_stackWinSize;
-    // Register window size and position can only be computed at runtime.
-
-    // FIXME: For now the log window is disabled and the memory window is taking
-    // its place.
-    static constexpr ImVec2 logsWinPos = ImVec2(0.0f,
-                                                codeWinPos.y + codeWinSize.y);
-    static constexpr ImVec2 logsWinSize = ImVec2(1.0f, 1.0f - codeWinSize.y);
-    // Memory window position and size.
-    static constexpr ImVec2 memWinPos = logsWinPos;
-    static constexpr ImVec2 memWinSize = logsWinSize;
-
     // (Re-)draw the GUI.
     void draw();
 
@@ -175,6 +141,21 @@ private:
         // never change overtime. The reason we cannot compute this value at
         // construction time is because Imgui might not be fully initialized.
         float m_childFrameWidth;
+    };
+
+    // The config "window" is a small bar to the top of the main window that
+    // directly manipulates the VM's configuration. This includes the cpu mode
+    // the VM starts, resetting the VM, ...
+    class ConfigBar : public Window {
+    public:
+        ConfigBar();
+    private:
+        // Don't draw the title on the config bar as this is not a window.
+        static constexpr ImGuiWindowFlags defaultFlags =
+            Imgui::defaultWindowFlags | ImGuiWindowFlags_NoTitleBar;
+
+        // Override.
+        virtual void doDraw(State const& state);
     };
 
     // Show the code being run in the VM. Simple layout printing each line of
@@ -385,6 +366,7 @@ private:
     };
 
     // The set of windows making up the interface of x86Lab.
+    std::unique_ptr<ConfigBar> m_configBar;
     std::unique_ptr<CodeWindow> m_codeWindow;
     std::unique_ptr<StackWindow> m_stackWindow;
     std::unique_ptr<CpuStateWindow> m_cpuStateWindow;
