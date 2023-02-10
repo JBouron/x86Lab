@@ -65,6 +65,7 @@ void Runner::processAction(Ui::Action const action) {
             doReverseStep();
             break;
         default:
+            // This includes Action::None.
             break;
     }
 }

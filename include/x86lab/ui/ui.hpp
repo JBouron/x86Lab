@@ -15,6 +15,8 @@ namespace X86Lab::Ui {
 
 // Possible actions from the user.
 enum class Action {
+    // No action.
+    None,
     // Run the next instruction in the VM.
     Step,
     // Go backward one instruction in the execution flow.

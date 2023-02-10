@@ -83,7 +83,10 @@ Action Imgui::doWaitForNextAction() {
 
         draw();
 
-        if (ImGui::IsKeyPressed(ImGuiKey_S, true)) {
+        Action const configAction(m_configBar->clickedAction());
+        if (configAction != Action::None) {
+            return configAction;
+        } else if (ImGui::IsKeyPressed(ImGuiKey_S, true)) {
             return Action::Step;
         } else if (ImGui::IsKeyPressed(ImGuiKey_R, true)) {
             return Action::ReverseStep;
@@ -295,8 +298,19 @@ float Imgui::Dropdown<T>::childFrameWidth() {
 Imgui::ConfigBar::ConfigBar() :
     Window("Dummy", defaultFlags) {}
 
+Action Imgui::ConfigBar::clickedAction() const {
+    return m_lastAction;
+}
+
 void Imgui::ConfigBar::doDraw(State const& __attribute__((unused)) state) {
-    ImGui::Text("PLACEHOLDER");
+    m_lastAction = Action::None;
+    if (ImGui::Button("[s] Step")) {
+        m_lastAction = Action::Step;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("[r] Reverse step")) {
+        m_lastAction = Action::ReverseStep;
+    }
 }
 
 Imgui::CodeWindow::CodeWindow() :

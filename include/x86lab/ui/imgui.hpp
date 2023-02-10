@@ -149,10 +149,19 @@ private:
     class ConfigBar : public Window {
     public:
         ConfigBar();
+
+        // Get the last action requested by the used by clicking on the buttons.
+        // @return: The last requested action, None if the user did not
+        // clic/request any button/action.
+        Action clickedAction() const;
     private:
         // Don't draw the title on the config bar as this is not a window.
         static constexpr ImGuiWindowFlags defaultFlags =
             Imgui::defaultWindowFlags | ImGuiWindowFlags_NoTitleBar;
+
+        // The last action requested from the user by manually clicking on the
+        // buttons. None if no action was requested.
+        Action m_lastAction;
 
         // Override.
         virtual void doDraw(State const& state);
@@ -167,7 +176,6 @@ private:
 
         // Create a code window, with default title and flags.
         CodeWindow();
-
     private:
         // Background color of the current line / instruction.
         static constexpr ImVec4 currLineBgColor = ImVec4(0.18, 0.18, 0.2, 1);
