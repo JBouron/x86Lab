@@ -296,13 +296,16 @@ float Imgui::Dropdown<T>::childFrameWidth() {
 }
 
 Imgui::ConfigBar::ConfigBar() :
-    Window("Dummy", defaultFlags) {}
+    Window("Dummy", defaultFlags),
+    m_lastAction(Action::None),
+    m_startCpuMode(Vm::CpuMode::LongMode) {}
 
 Action Imgui::ConfigBar::clickedAction() const {
     return m_lastAction;
 }
 
 void Imgui::ConfigBar::doDraw(State const& __attribute__((unused)) state) {
+    // Stepping buttons + Reset.
     m_lastAction = Action::None;
     if (ImGui::Button("[s] Step")) {
         m_lastAction = Action::Step;
@@ -314,6 +317,37 @@ void Imgui::ConfigBar::doDraw(State const& __attribute__((unused)) state) {
     ImGui::SameLine();
     if (ImGui::Button("Reset VM")) {
         m_lastAction = Action::Reset;
+    }
+
+    // Starting CPU mode radio button. Only one mode can be selected at a time.
+    // Changing this mode resets the VM.
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    ImGui::Text("Start CPU mode:");
+    ImGui::SameLine();
+    Vm::CpuMode const prevSelectedMode(m_startCpuMode);
+    if (ImGui::RadioButton("16-bit real mode",
+                           m_startCpuMode == Vm::CpuMode::RealMode)) {
+        m_startCpuMode = Vm::CpuMode::RealMode;
+        if (m_startCpuMode != prevSelectedMode) {
+            m_lastAction = Action::Reset16;
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("32-bit protected mode",
+                           m_startCpuMode == Vm::CpuMode::ProtectedMode)) {
+        m_startCpuMode = Vm::CpuMode::ProtectedMode;
+        if (m_startCpuMode != prevSelectedMode) {
+            m_lastAction = Action::Reset32;
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("64-bit long mode",
+                           m_startCpuMode == Vm::CpuMode::LongMode)) {
+        m_startCpuMode = Vm::CpuMode::LongMode;
+        if (m_startCpuMode != prevSelectedMode) {
+            m_lastAction = Action::Reset64;
+        }
     }
 }
 

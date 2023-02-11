@@ -163,6 +163,14 @@ private:
         // buttons. None if no action was requested.
         Action m_lastAction;
 
+        // The currently selected value for the starting CPU mode. Changing this
+        // value is done through the three radio buttons in the config bar.
+        // Changing the starting cpu mode resets the VM.
+        // By default the VM starts in 64-bit long mode.
+        // FIXME: This default value must be the same as the default starting
+        // cpu mode in main.cpp. Currently there is nothing enforcing this!
+        Vm::CpuMode m_startCpuMode;
+
         // Override.
         virtual void doDraw(State const& state);
     };

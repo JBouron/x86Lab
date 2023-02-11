@@ -24,14 +24,29 @@ Runner::ReturnReason Runner::run() {
     // Termination condition in body.
     while (true) {
         Ui::Action const action(m_ui->waitForNextAction());
+        bool const resetRequested(action == Ui::Action::Reset ||
+                                  action == Ui::Action::Reset16 ||
+                                  action == Ui::Action::Reset32 ||
+                                  action == Ui::Action::Reset64);
         if (action == Ui::Action::Quit) {
             // Termination condition.
             return ReturnReason::Quit;
-        } else if (action == Ui::Action::Reset) {
+        } else if (resetRequested) {
             // User requested resetting the VM. In this case the Runner let's
             // the caller (e.g. main()) takes care of this. At this point this
             // runner instance is done running and ready to be destroyed.
-            return ReturnReason::ResetVm;
+            if (action == Ui::Action::Reset) {
+                return ReturnReason::Reset;
+            }
+            if (action == Ui::Action::Reset16) {
+                return ReturnReason::Reset16;
+            }
+            if (action == Ui::Action::Reset32) {
+                return ReturnReason::Reset32;
+            }
+            if (action == Ui::Action::Reset64) {
+                return ReturnReason::Reset64;
+            }
         } else {
             processAction(action);
             updateUi();

@@ -14,16 +14,13 @@ static void help() {
     std::cerr << "Usage:" << std::endl;
     std::cerr << "    x86lab [options] <file>" << std::endl << std::endl;
     std::cerr << "Options:" << std::endl;
-    std::cerr << "    --16   Execute the code in 16 bit real mode" << std::endl;
-    std::cerr << "    --32   Execute the code in 32 bit" << std::endl;
-    std::cerr << "    --64   Execute the code in 64 bit, default" << std::endl;
     std::cerr << "    --help This message" << std::endl;
     std::cerr << "<file> is a file path to an assembly file that must be "
         "compatible with the NASM assembler. Any NASM directive within this "
         "file is valid and accepted" << std::endl;
 }
 
-static void run(Vm::CpuMode const vmStartMode, std::string const& fileName) {
+static void run(std::string const& fileName) {
     // Run code in `fileName` starting directly in 64 bits mode.
     std::shared_ptr<Ui::Backend> ui(new Ui::Imgui());
 
@@ -40,20 +37,16 @@ static void run(Vm::CpuMode const vmStartMode, std::string const& fileName) {
     // Create the VM and load the code in memory.
 
     bool exitRequested(false);
+    // By default the VM starts in 64-bit long mode. This can be changed through
+    // the interface. Changing the start CPU mode resets the VM.
+    Vm::CpuMode startCpuMode(Vm::CpuMode::LongMode);
     while (!exitRequested) {
         // When the user requests resetting the VM we simply destroy the VM and
         // re-create it from scratch. This is much easier compared to manually
         // resetting the state of the CPU and memory.
 
         // FIXME: We need a way to specify the size of the VM.
-        std::shared_ptr<Vm> vm(new Vm(vmStartMode, 4 * X86Lab::PAGE_SIZE));
-        if (vmStartMode == Vm::CpuMode::ProtectedMode) {
-            ui->log("VM is using 32-bit protected-mode");
-        } else if (vmStartMode == Vm::CpuMode::LongMode) {
-            ui->log("VM is using 64-bit long-mode");
-        } else {
-            ui->log("Vm is using 16-bit real-mode");
-        }
+        std::shared_ptr<Vm> vm(new Vm(startCpuMode, 4 * X86Lab::PAGE_SIZE));
 
         vm->loadCode(*code);
         ui->log("Code loaded");
@@ -62,7 +55,16 @@ static void run(Vm::CpuMode const vmStartMode, std::string const& fileName) {
         // they cannot be used anymore.
         Runner runner(vm, code, ui);
         Runner::ReturnReason const retReason(runner.run());
-        exitRequested = retReason == Runner::ReturnReason::Quit;
+
+        if (retReason == Runner::ReturnReason::Quit) {
+            exitRequested = true;
+        } else if (retReason == Runner::ReturnReason::Reset16) {
+            startCpuMode = Vm::CpuMode::RealMode;
+        } else if (retReason == Runner::ReturnReason::Reset32) {
+            startCpuMode = Vm::CpuMode::ProtectedMode;
+        } else if (retReason == Runner::ReturnReason::Reset64) {
+            startCpuMode = Vm::CpuMode::LongMode;
+        }
     }
 }
 
@@ -73,17 +75,9 @@ int main(int argc, char **argv) {
         std::exit(1);
     }
 
-    // By default use long-mode on the VM.
-    Vm::CpuMode startMode(Vm::CpuMode::LongMode);
     for (int i(1); i < argc - 1; ++i) {
         std::string const arg(argv[i]);
-        if (arg == "--16") {
-            startMode = Vm::CpuMode::RealMode;
-        } else if (arg == "--32") {
-            startMode = Vm::CpuMode::ProtectedMode;
-        } else if (arg == "--64") {
-            startMode = Vm::CpuMode::LongMode;
-        } else if (arg == "--help") {
+        if (arg == "--help") {
             help();
             std::exit(0);
         } else {
@@ -96,7 +90,7 @@ int main(int argc, char **argv) {
     std::string const fileName(argv[argc - 1]);
 
     try {
-        run(startMode, fileName);
+        run(fileName);
     } catch (Error const& error) {
         std::string const msg(error.what());
         std::perror(("Error: " + msg).c_str());

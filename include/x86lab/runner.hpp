@@ -22,7 +22,13 @@ public:
         // User explicitly requested to exit the application.
         Quit,
         // User requested resetting the VM.
-        ResetVm,
+        Reset,
+        // Reset the VM into 16-bit real mode.
+        Reset16,
+        // Reset the VM into 32-bit protected mode.
+        Reset32,
+        // Reset the VM into 64-bit protected mode.
+        Reset64,
     };
 
     // Run the main-loop. This can only be called once! This function only
