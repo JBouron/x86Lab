@@ -78,6 +78,13 @@ public:
     // Get a pointer on the full snapshot associated to this State.
     std::shared_ptr<Snapshot const> snapshot() const;
 
+    // Get the address at which the code was loaded in the VM's memory.
+    // @return: The linear address of the first byte of code.
+    u64 codeLinearAddr() const;
+
+    // Get the size of the loaded code in bytes.
+    u64 codeSize() const;
+
 private:
     Vm::OperatingState m_runState;
     std::shared_ptr<Code const> m_loadedCode;

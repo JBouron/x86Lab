@@ -53,6 +53,15 @@ std::shared_ptr<Snapshot const> State::snapshot() const {
     return m_latestSnapshot;
 }
 
+u64 State::codeLinearAddr() const {
+    // The code is always loaded at linear address 0x0.
+    return 0x0;
+}
+
+u64 State::codeSize() const {
+    return m_loadedCode->size();
+}
+
 Backend::~Backend() {}
 
 bool Backend::init() {

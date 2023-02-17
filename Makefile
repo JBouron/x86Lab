@@ -3,7 +3,7 @@ AS := $(CXX)
 ASFLAGS := -c
 CXXFLAGS := -Wall -Wextra -Werror -Iinclude/ -I. -Iimgui -Iimgui/backends \
 	-std=c++20 `sdl2-config --cflags` -O3
-LDLIBS := -lncurses `sdl2-config --libs`
+LDLIBS := -lncurses `sdl2-config --libs` -lcapstone
 SHELL := /bin/bash
 
 CPP_FILES := $(shell find src/ imgui/ -type f -name "*.cpp")

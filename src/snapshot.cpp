@@ -383,6 +383,14 @@ MapResult map<0>(BlockTree const& mem __attribute__((unused)),
 
 std::vector<u8> Snapshot::readLinearMemory(u64 const offset,
                                            u64 const size) const {
+    Vm::CpuMode const mode(cpuMode());
+    if (mode == Vm::CpuMode::RealMode || mode == Vm::CpuMode::ProtectedMode) {
+        // When the machine runs in real-mode or 32-bit mode, paging is not
+        // enabled, we can read the physical memory directly.
+        // FIXME: We need to add support for paging in 32-bit mode if it gets
+        // enabled by the code at some point.
+        return readPhysicalMemory(offset, size);
+    }
     // When reading linear memory we need to read page by page since they might
     // not be continous in physical memory.
     u64 const startPageIdx(offset >> 12);
@@ -417,4 +425,17 @@ std::vector<u8> Snapshot::readLinearMemory(u64 const offset,
     }
     return result;
 }
+
+Vm::CpuMode Snapshot::cpuMode() const {
+    if (!(m_regs.cr0 & 0x1)) {
+        // Real-mode.
+        return Vm::CpuMode::RealMode;
+    } else if (!(m_regs.efer & (1 << 10))) {
+        // 32-bit
+        return Vm::CpuMode::ProtectedMode;
+    } else {
+        return Vm::CpuMode::LongMode;
+    }
+}
+
 }

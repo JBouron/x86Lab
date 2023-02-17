@@ -62,6 +62,11 @@ public:
     // mapped, == size if the entire range was mapped, <= size if the range was
     // not fully mapped.
     std::vector<u8> readLinearMemory(u64 const offset, u64 const size) const;
+
+    // Get the enabled mode on the cpu in this snapshot.
+    // @return: The Vm::CpuMode indicating the current cpu mode.
+    Vm::CpuMode cpuMode() const;
+
 private:
     // The snapshot this snapshot is built on top of.
     std::shared_ptr<Snapshot> m_baseSnapshot;

@@ -188,12 +188,44 @@ private:
         // Background color of the current line / instruction.
         static constexpr ImVec4 currLineBgColor = ImVec4(0.18, 0.18, 0.2, 1);
 
+        // The disassembled code, indexed by the address of each instruction.
+        // Each pair contains the bytes and mnemonic of the instruction.
+        std::map<u64, std::pair<std::string, std::string>> m_disassembledCode;
+
+        // Clears m_disassembledCode and re-disassemble the code from scratch,
+        // starting at RIP.
+        void disassembleCode(State const& state);
+
+        // The mode the cpu was in during the last instruction/state.
+        Vm::CpuMode m_previousCpuMode;
+
         // The RIP during the last call to draw. Use to detect when the current
         // instruction changed and when to focus/scroll on it.
         u64 m_previousRip;
 
+        // The format available for the code window.
+        enum class Format {
+            // Show the source file along with line numbers. This assume that
+            // the code is loaded at address 0. This will not work with
+            // self-modifying code or if the CPU configured a different linear
+            // addres to point to physical address 0.
+            Source,
+            // Disassemble the code at the current RIP. This will work in any
+            // situation however some information is lost (e.g. label names,
+            // ...).
+            Disassembly,
+        };
+        // Drop-down selecting the format.
+        std::unique_ptr<Dropdown<Format>> m_formatDropdown;
+
         // Override.
         virtual void doDraw(State const& state);
+
+        // The two modes of the Code window.
+        // doDraw when the current format is Source.
+        void doDrawSourceFile(State const& state);
+        // doDraw when the current format is Disassebly.
+        void doDrawDisassembly(State const& state);
     };
 
     // Stack window: The stack windows shows the current state of the stack in a

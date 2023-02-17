@@ -7,6 +7,8 @@
 #include <span>
 #include <functional>
 
+#include <capstone/capstone.h>
+
 namespace X86Lab::Ui {
 
 // SDL window and renderer left to nullptr until doInit() is called on this
@@ -138,7 +140,7 @@ void Imgui::draw() {
 
     // Code window
     ImVec2 const codeWindowPos(0.0f, configBarPos.y + configBarSize.y);
-    ImVec2 const codeWindowSetupSize(codeWinSize.x * vpSize.x,
+    ImVec2 const codeWindowSetupSize(0.0f,
         codeWinSize.y * (vpSize.y - configBarSize.y));
     ImVec2 const codeWindowSize(m_codeWindow->draw(codeWindowPos,
         codeWindowSetupSize, m_state));
@@ -353,9 +355,167 @@ void Imgui::ConfigBar::doDraw(State const& __attribute__((unused)) state) {
 
 Imgui::CodeWindow::CodeWindow() :
     Window(defaultTitle, Imgui::defaultWindowFlags),
-    m_previousRip(~((u64)0)) {}
+    m_previousRip(~((u64)0)) {
+    static std::map<Format, std::string> const formatToString = {
+        {Format::Source, "Source"},
+        {Format::Disassembly, "Disassembly"},
+    };
+    m_formatDropdown = std::make_unique<Dropdown<Format>>("Code format:",
+        formatToString);
+}
+
+void Imgui::CodeWindow::disassembleCode(State const& state) {
+    std::shared_ptr<Snapshot const> const snap(state.snapshot());
+    // First check if we need to disassemble. Most of the time we can reuse the
+    // m_disassembledCode cache excepted in the following cases:
+    //  - The code was never disassembled, e.g. m_disassembledCode is empty.
+    //  - The cpu changed its current mode, e.g. transitioned between two of the
+    //  16, 32 and 64 bit modes.
+    //  - The disassembled code in m_disassembledCode does not contain the
+    //  address at which RIP is currently pointing to. This would typically
+    //  happen if RIP jumps in a middle of an instruction or if there is data
+    //  between two instruction that is mis-interpreted by the disassembler.
+    //  - Code was modified. FIXME: This is not yet suppored.
+    Vm::CpuMode const cpuMode(snap->cpuMode());
+    bool const cpuModeChanged(cpuMode != m_previousCpuMode);
+    m_previousCpuMode = cpuMode;
+    bool const needsDisassembly(cpuModeChanged || m_disassembledCode.empty()
+        || !m_disassembledCode.contains(state.registers().rip));
+    if (!needsDisassembly) {
+        // No need to disassemble, the current contents of m_disassembledCode
+        // can be used as is. Skip.
+        return;
+    }
+
+    // (Re-)disassemble the code. When disassembling we start at the current
+    // RIP. The code window then resets the Y scroll to show the instruction
+    // under RIP at the top.
+
+    m_disassembledCode.clear();
+
+    csh capstoneHandle;
+    cs_insn *instructions;
+
+    cs_mode disassemblyMode;
+    if (cpuMode == Vm::CpuMode::RealMode) {
+        // Real-mode.
+        disassemblyMode = CS_MODE_16;
+    } else if (cpuMode == Vm::CpuMode::ProtectedMode) {
+        // 32-bit
+        disassemblyMode = CS_MODE_32;
+    } else {
+        disassemblyMode = CS_MODE_64;
+    }
+
+    if (cs_open(CS_ARCH_X86, disassemblyMode, &capstoneHandle) != CS_ERR_OK) {
+        ImGui::Text("Failed to initialize disassembler");
+        return;
+    }
+
+    if (cs_option(capstoneHandle, CS_OPT_SKIPDATA, CS_OPT_ON) != CS_ERR_OK) {
+        ImGui::Text("Failed to initialize disassembler");
+        return;
+    }
+
+    u64 const codeAddrStart(state.registers().rip);
+    // FIXME: This might end-up disassembling a bit more than needed.
+    u64 const codeSize(state.codeSize());
+    std::vector<u8> const code(snap->readLinearMemory(codeAddrStart, codeSize));
+    // Disassemble the instructions starting at codeAddrStart. The `0` means
+    // that the disassembler stops until there is no more code to read or until
+    // it encounters a broken instruction.
+    size_t const instrCount(cs_disasm(capstoneHandle, code.data(), code.size(),
+        codeAddrStart, 0, &instructions));
+
+    for (size_t i(0); i < instrCount; ++i) {
+        cs_insn const& ins(instructions[i]);
+        u64 const insAddr(ins.address);
+        std::ostringstream insBytes;
+        for (int j(0); j < ins.size; ++j) {
+            insBytes << std::hex << std::setw(2) << std::setfill('0');
+            insBytes << u64(ins.bytes[j]) << " ";
+        }
+        std::ostringstream insMnemonic;
+        insMnemonic << ins.mnemonic << " " << ins.op_str;
+        m_disassembledCode[insAddr] =
+            std::make_pair(insBytes.str(), insMnemonic.str());
+    }
+
+    cs_free(instructions, instrCount);
+    cs_close(&capstoneHandle);
+}
 
 void Imgui::CodeWindow::doDraw(State const& state) {
+    m_formatDropdown->draw();
+    switch (m_formatDropdown->selection()) {
+        case Format::Source:
+            doDrawSourceFile(state);
+            break;
+        case Format::Disassembly:
+            doDrawDisassembly(state);
+            break;
+        default:
+            throw std::runtime_error("Invalid code window format");
+    }
+}
+
+void Imgui::CodeWindow::doDrawDisassembly(State const& state) {
+    // Disassemble the code and update m_disassembledCode if needed.
+    disassembleCode(state);
+    
+    // Setup table, 3 columns: linear address, bytes, instruction.
+    ImGuiTableFlags const tableFlags(ImGuiTableFlags_SizingFixedFit |
+                                     ImGuiTableFlags_BordersInnerV |
+                                     ImGuiTableFlags_BordersOuter |
+                                     ImGuiTableFlags_ScrollX |
+                                     ImGuiTableFlags_ScrollY);
+    if (!ImGui::BeginTable("CodeTable", 3, tableFlags)) {
+        return;
+    }
+
+    ImGui::TableSetupColumn("Linear address");
+    ImGui::TableSetupColumn("Machine code");
+    ImGui::TableSetupColumn("Instruction");
+    ImGui::TableHeadersRow();
+
+    bool const isDrawingNewState(m_previousRip != state.registers().rip);
+    m_previousRip = state.registers().rip;
+
+    ImVec2 const padding(ImGui::GetStyle().CellPadding);
+    float const rowHeight(ImGui::GetFontSize() + padding.y * 2.0f);
+    ImDrawList* const drawList(ImGui::GetWindowDrawList());
+
+    for (auto& elem : m_disassembledCode) {
+        u64 const insAddr(elem.first);
+        std::string const& insBytes(elem.second.first);
+        std::string const& insOp(elem.second.second);
+
+        ImGui::TableNextColumn();
+        if (insAddr == state.registers().rip) {
+            ImVec2 const cursorPos(ImGui::GetCursorScreenPos());
+            ImVec2 const rectMin(cursorPos.x - padding.x,
+                                 cursorPos.y - padding.y);
+            float const rectWidth(ImGui::GetWindowContentRegionMax().x);
+            float const rectHeight(rowHeight);
+            ImVec2 const rectMax(rectMin.x + rectWidth,
+                                 rectMin.y + rectHeight);
+            u32 const color(ImGui::GetColorU32(currLineBgColor));
+            drawList->AddRectFilled(rectMin, rectMax, color);
+            if (isDrawingNewState) {
+                ImGui::SetScrollHereY(0.5);
+            }
+        }
+        ImGui::Text("0x%016lx", insAddr);
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(insBytes.c_str());
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(insOp.c_str());
+    }
+
+    ImGui::EndTable();
+}
+
+void Imgui::CodeWindow::doDrawSourceFile(State const& state) {
     std::string const fileName(state.sourceFileName());
     if (!fileName.size()) {
         // A the beginning of program execution, the state could be default and
