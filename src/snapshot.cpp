@@ -383,14 +383,16 @@ MapResult map<0>(BlockTree const& mem __attribute__((unused)),
 
 std::vector<u8> Snapshot::readLinearMemory(u64 const offset,
                                            u64 const size) const {
-    Vm::CpuMode const mode(cpuMode());
-    if (mode == Vm::CpuMode::RealMode || mode == Vm::CpuMode::ProtectedMode) {
-        // When the machine runs in real-mode or 32-bit mode, paging is not
-        // enabled, we can read the physical memory directly.
-        // FIXME: We need to add support for paging in 32-bit mode if it gets
-        // enabled by the code at some point.
+    bool const pagingEnabled(m_regs.cr0 & (1 << 31));
+    if (!pagingEnabled) {
+        // Paging is not enabled, linear memory addresses == physical memory
+        // addresses hence we can read from physical memory directly.
         return readPhysicalMemory(offset, size);
     }
+    // FIXME: If paging is enabled while running in 32-bit protected mode, this
+    // function will interpret the page table as 64-bit 4 level page table and
+    // will fail spectacularly.
+
     // When reading linear memory we need to read page by page since they might
     // not be continous in physical memory.
     u64 const startPageIdx(offset >> 12);
@@ -427,15 +429,82 @@ std::vector<u8> Snapshot::readLinearMemory(u64 const offset,
 }
 
 Vm::CpuMode Snapshot::cpuMode() const {
-    if (!(m_regs.cr0 & 0x1)) {
-        // Real-mode.
+    bool const protectedModeEnabled(m_regs.cr0 & 0x1);
+    if (!protectedModeEnabled) {
+        // Protected mode is not enabled, we are in real mode hence running
+        // 16-bit code.
         return Vm::CpuMode::RealMode;
-    } else if (!(m_regs.efer & (1 << 10))) {
-        // 32-bit
-        return Vm::CpuMode::ProtectedMode;
     } else {
-        return Vm::CpuMode::LongMode;
+        // Protected mode is enabled, we can either run 16, 32, or 64 bit code
+        // at this point.
+        // Check if the entry at index `index` is a valid GDT entry, that is the
+        // entry is within the GDT's limits and its present bit is set.
+        // @return: true if the entry is valid, false otherwise.
+        auto const isValidGdtEntry([this](u16 const index) {
+            // Make sure not to get bamboozled by an overflow: a limit of 0xffff
+            // is valid and indicate that the GDT has the max amount of entries.
+            u64 const numEntries((u64(m_regs.gdt.limit) + 1) / 8);
+            if (numEntries <= index) {
+                // Index points outside the GDT.
+                return false;
+            }
+            // Now read the GDT entry.
+            u64 const gdtOffset(m_regs.gdt.base);
+            u64 const entryLinAddr(gdtOffset + index * 8);
+            std::vector<u8> const entryBytes(readLinearMemory(entryLinAddr, 8));
+            // Check the present bit.
+            u64 const mask(1ULL << 47);
+            return !!(*reinterpret_cast<u64 const*>(entryBytes.data()) & mask);
+        });
+
+        // Read the segment descriptor at index `index` in the GDT and return
+        // its D/B.
+        auto const defaultOpSizeForGdtEntry([this](u16 const index) {
+            u64 const gdtOffset(m_regs.gdt.base);
+            u64 const entryLinAddr(gdtOffset + index * 8);
+            std::vector<u8> const entryBytes(readLinearMemory(entryLinAddr, 8));
+            return (*reinterpret_cast<u64 const*>(entryBytes.data()) >> 54) & 1;
+        });
+
+        // Read the L bit of the segment descriptor at index `index` in the GDT.
+        auto const LbitForGdtEntry([this](u16 const index) {
+            u64 const gdtOffset(m_regs.gdt.base);
+            u64 const entryLinAddr(gdtOffset + index * 8);
+            std::vector<u8> const entryBytes(readLinearMemory(entryLinAddr, 8));
+            return (*reinterpret_cast<u64 const*>(entryBytes.data()) >> 53) & 1;
+        });
+
+        // FIXME: We are not yet supporting LDTs here.
+        u16 const codeSegmentIndex(m_regs.cs >> 3);
+
+        bool const longModeActive(m_regs.efer & (1 << 10));
+        if (!longModeActive) {
+            // The Long Mode Active (LMA) bit of EFER is un-set hence we are
+            // still in protected mode, right before enabling 64-bit mode. Look
+            // at the current code segment being used to know if we are running
+            // in 16 or 32 bit mode.
+            if (!isValidGdtEntry(codeSegmentIndex)) {
+                // The code segment index is not valid, we must be still in
+                // 16-bit mode between the mov enabling the protected mode and
+                // the far jump into protected mode.
+                return Vm::CpuMode::RealMode;
+            } else if (defaultOpSizeForGdtEntry(codeSegmentIndex) == 0) {
+                // We are running in a 16-bit segment.
+                return Vm::CpuMode::RealMode;
+            } else {
+                // We are running in a 32-bit segment.
+                return Vm::CpuMode::ProtectedMode;
+            }
+        } else {
+            // Long mode is active, we are either in a 32-bit compat mode or in
+            // a 64-bit mode. We can differentiate by looking at the L bit of
+            // the current code segment.
+            if (LbitForGdtEntry(codeSegmentIndex)) {
+                return Vm::CpuMode::LongMode;
+            } else {
+                return Vm::CpuMode::ProtectedMode;
+            }
+        }
     }
 }
-
 }
