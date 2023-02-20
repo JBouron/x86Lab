@@ -887,6 +887,11 @@ void Imgui::CpuStateWindow::doDraw(State const& state) {
         ImGui::EndTabItem();
     }
 
+    if (ImGui::BeginTabItem("GDT", NULL, 0)) {
+        doDrawGdt(state);
+        ImGui::EndTabItem();
+    }
+
     ImGui::EndTabBar();
 }
 
@@ -1585,6 +1590,122 @@ void Imgui::CpuStateWindow::doDrawPageTables(State const& state) {
 
     u64 const pml4PhyOffset(state.registers().cr3 & ~((1 << 12) - 1));
     printTables(4, pml4PhyOffset, 0);
+
+    ImGui::EndTable();
+}
+
+// x86 segment descriptor layout, this is used to easily parse each field from a
+// raw 64-bit value representing a descriptor in the GDT.
+struct SegmentDescriptor {
+    uint16_t limitLow;
+    uint16_t baseLow;
+    uint8_t baseMid;
+    uint8_t type : 4;
+    uint8_t S : 1;
+    uint8_t DPL : 2;
+    uint8_t P : 1;
+    uint8_t limitHigh : 4;
+    uint8_t AVL : 1;
+    uint8_t L : 1;
+    uint8_t DB : 1;
+    uint8_t G : 1;
+    uint8_t baseHigh;
+} __attribute__((packed));
+
+void Imgui::CpuStateWindow::doDrawGdt(State const& state) {
+    // Draw info about the GDTR.
+    Vm::State::Registers::Table const gdt(state.registers().gdt);
+    // The limit is always of the form 8*N - 1 because base + limit must point
+    // to the last byte of the table. Each segment descriptor is 8 bytes in
+    // length. Hence the number of segments is (limit + 1) / 8.
+    // Note: Promote the limit to 64 bit so that we gracefully handle the case
+    // where limit == 0xffff.
+    u64 const segDescSize(8);
+    u64 const numSegments(((u64)gdt.limit + 1) / segDescSize);
+
+    ImGui::Text("GDT base linear address: 0x%016lx", gdt.base);
+    ImGui::Text("GDT limit: 0x%04hx", gdt.limit);
+
+    ImGuiTableFlags const tableFlags(ImGuiTableFlags_BordersOuter |
+                                     ImGuiTableFlags_RowBg |
+                                     ImGuiTableFlags_ScrollX |
+                                     ImGuiTableFlags_ScrollY |
+                                     ImGuiTableFlags_SizingFixedFit |
+                                     ImGuiTableFlags_BordersInnerV);
+
+    // Draw a table containing all the segments descriptors in the GDT, with the
+    // following columns:
+    // Base | Limit | Type | S | DPL | P | AVL | L | D/B | G | Raw value
+    if (!ImGui::BeginTable("#GDT", 12, tableFlags)) {
+        return;
+    }
+
+    ImGui::TableSetupScrollFreeze(1, 0);
+
+    ImGui::TableSetupColumn("");
+    ImGui::TableSetupColumn("Base");
+    ImGui::TableSetupColumn("Limit");
+    ImGui::TableSetupColumn("Type");
+    ImGui::TableSetupColumn(" S ");
+    ImGui::TableSetupColumn("DPL");
+    ImGui::TableSetupColumn(" P ");
+    ImGui::TableSetupColumn("AVL");
+    ImGui::TableSetupColumn(" L ");
+    ImGui::TableSetupColumn("D/B");
+    ImGui::TableSetupColumn(" G ");
+    ImGui::TableSetupColumn("Raw value");
+    ImGui::TableHeadersRow();
+
+    std::shared_ptr<X86Lab::Snapshot const> const snap(state.snapshot());
+    for (u64 i(0); i < numSegments; ++i) {
+        // Read the next segment descriptor from the table.
+        u64 const descLinAddr(gdt.base + i * segDescSize);
+        std::vector<u8> const raw(snap->readLinearMemory(descLinAddr,
+            segDescSize));
+        SegmentDescriptor const desc(
+            *reinterpret_cast<SegmentDescriptor const*>(raw.data()));
+
+        u64 const base((desc.baseHigh << 24) |
+                       (desc.baseMid << 16) |
+                       desc.baseLow);
+        u64 const limit((desc.limitHigh << 16) | desc.limitLow);
+
+        if (!desc.P) {
+            // Darken the non present descriptors.
+            ImGui::PushStyleColor(ImGuiCol_Text, unmappedColor);
+        }
+
+        ImGui::TableNextColumn();
+        ImGui::Text("%ld", i);
+        ImGui::TableNextColumn();
+        ImGui::Text("0x%016lx", base);
+        ImGui::TableNextColumn();
+        ImGui::Text("0x%016lx", limit);
+        ImGui::TableNextColumn();
+        ImGui::Text("0x%01x", desc.type);
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(desc.S ? " 1 " : " 0 ");
+        ImGui::TableNextColumn();
+        ImGui::Text("%d", desc.DPL);
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(desc.P ? " 1 " : " 0 ");
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(desc.AVL ? " 1 " : " 0 ");
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(desc.L ? " 1 " : " 0 ");
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(desc.DB ? " 1 " : " 0 ");
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(desc.G ? " 1 " : " 0 ");
+        ImGui::TableNextColumn();
+        ImGui::Text("0x%016lx", *reinterpret_cast<u64 const*>(raw.data()));
+
+
+        if (!desc.P) {
+            // Darken the non present descriptors.
+            ImGui::PopStyleColor();
+        }
+    }
 
     ImGui::EndTable();
 }

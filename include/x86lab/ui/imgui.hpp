@@ -347,7 +347,11 @@ private:
         // Draw the tab showing SSE & AVX registers.
         void doDrawSseAvx(State const& state);
 
+        // Draw the tab showing the state of the page tables.
         void doDrawPageTables(State const& state);
+
+        // Draw the tab showing the state of the GDT entries.
+        void doDrawGdt(State const& state);
 
         // The dropdown used to select the display format of general purpose
         // registers.
