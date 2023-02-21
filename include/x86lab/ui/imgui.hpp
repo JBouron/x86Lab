@@ -373,7 +373,8 @@ private:
         //  will contain the entries.
         //  - A method draw() which draws the entry in the current table.
         template<typename EntryType>
-        void doDrawIdtHelper(State const& state);
+        void doDrawTable(Vm::State::Registers::Table const& table,
+                         State const& state);
 
         // The dropdown used to select the display format of general purpose
         // registers.
