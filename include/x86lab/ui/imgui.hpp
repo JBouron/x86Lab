@@ -353,6 +353,28 @@ private:
         // Draw the tab showing the state of the GDT entries.
         void doDrawGdt(State const& state);
 
+        // Draw the tab showing the state of the IDT entries.
+        void doDrawIdt(State const& state);
+
+        // Helper function for drawing an IDT using a specific type as entry.
+        // This creates an ImGui table where each row represent an entry in the
+        // IDT. The EntryType template parameter indicates how the IDT should be
+        // interpreted, e.g. it is interpreted as an array of EntryType. The
+        // EntryType defines how many column the ImGui table should contain as
+        // well as their name, etc...
+        // This is meant to avoid code duplication when drawing the IDT entries
+        // in the different CPU modes. More specifically all the boiler plate
+        // needed to create the ImGui table etc...
+        // EntryType is expected to have the following members:
+        //  - A static member u32 numCols which indicates the number of columns
+        //  necessary to draw an entry.
+        //  - A static member char const*[] colNames which indicate the name of
+        //  each column. This is used to print the header row of the table that
+        //  will contain the entries.
+        //  - A method draw() which draws the entry in the current table.
+        template<typename EntryType>
+        void doDrawIdtHelper(State const& state);
+
         // The dropdown used to select the display format of general purpose
         // registers.
         std::unique_ptr<Dropdown<DisplayFormat>> m_gpFormatDropdown;

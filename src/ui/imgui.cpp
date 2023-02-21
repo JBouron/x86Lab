@@ -892,6 +892,11 @@ void Imgui::CpuStateWindow::doDraw(State const& state) {
         ImGui::EndTabItem();
     }
 
+    if (ImGui::BeginTabItem("IDT", NULL, 0)) {
+        doDrawIdt(state);
+        ImGui::EndTabItem();
+    }
+
     ImGui::EndTabBar();
 }
 
@@ -1705,6 +1710,92 @@ void Imgui::CpuStateWindow::doDrawGdt(State const& state) {
             // Darken the non present descriptors.
             ImGui::PopStyleColor();
         }
+    }
+
+    ImGui::EndTable();
+}
+
+// Type to use in doDrawIdtHelper in order to print a real-mode IDT.
+struct IdtEntry16Bits {
+    static constexpr u32 numCols = 3;
+    static constexpr char const * colNames[numCols] = {
+        "Segment selector",
+        "Offset",
+        "Linear address",
+    };
+
+    void draw() const {
+        ImGui::TableNextColumn();
+        ImGui::Text("0x%04hx", segmentSelector);
+        ImGui::TableNextColumn();
+        ImGui::Text("0x%04hx", offset);
+
+        u32 const linearAddr((segmentSelector << 4) + offset);
+        ImGui::TableNextColumn();
+        ImGui::Text("0x%08x", linearAddr);
+    }
+
+    u16 offset;
+    u16 segmentSelector;
+} __attribute__((packed));
+static_assert(sizeof(IdtEntry16Bits) == 4);
+
+void Imgui::CpuStateWindow::doDrawIdt(State const& state) {
+    Vm::State::Registers::Table const idt(state.registers().idt);
+    ImGui::Text("IDT base linear address: 0x%016lx", idt.base);
+    ImGui::Text("IDT limit: 0x%04hx", idt.limit);
+
+    std::shared_ptr<X86Lab::Snapshot const> const snap(state.snapshot());
+    Vm::CpuMode const cpuMode(snap->cpuMode());
+    switch (cpuMode) {
+        case Vm::CpuMode::RealMode:
+            doDrawIdtHelper<IdtEntry16Bits>(state);
+            break;
+        default:
+            ImGui::Text("Not supported in current CPU mode");
+            break;
+    }
+}
+
+template<typename EntryType>
+void Imgui::CpuStateWindow::doDrawIdtHelper(State const& state) {
+    ImGuiTableFlags const tableFlags(ImGuiTableFlags_BordersOuter |
+                                     ImGuiTableFlags_RowBg |
+                                     ImGuiTableFlags_ScrollX |
+                                     ImGuiTableFlags_ScrollY |
+                                     ImGuiTableFlags_SizingFixedFit |
+                                     ImGuiTableFlags_BordersInnerV);
+
+    // +1 because of the first column printing the index of each entry.
+    u32 const numCols(EntryType::numCols + 1);
+    if (!ImGui::BeginTable("#IDT", numCols, tableFlags)) {
+        return;
+    }
+
+    // Freeze the header row.
+    ImGui::TableSetupScrollFreeze(1, 0);
+
+    // Setup the column names + header row.
+    ImGui::TableSetupColumn("");
+    for (u32 i(0); i < EntryType::numCols; ++i) {
+        ImGui::TableSetupColumn(EntryType::colNames[i]);
+    }
+    ImGui::TableHeadersRow();
+
+    // Print each entry of the IDT.
+    std::shared_ptr<X86Lab::Snapshot const> const snap(state.snapshot());
+    u64 const idtLinAddr(state.registers().idt.base);
+    u64 const entrySize(sizeof(EntryType));
+    u64 const numEntries((state.registers().idt.limit + 1) / entrySize);
+    for (u32 i(0); i < numEntries; ++i) {
+        u64 const entryOff(idtLinAddr + i * entrySize);
+        std::vector<u8> const raw(snap->readLinearMemory(entryOff, entrySize));
+        EntryType const entry(*reinterpret_cast<EntryType const*>(raw.data()));
+
+        ImGui::TableNextColumn();
+        ImGui::Text("%d", i);
+
+        entry.draw();
     }
 
     ImGui::EndTable();
