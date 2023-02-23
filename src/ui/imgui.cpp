@@ -1769,8 +1769,10 @@ struct IdtEntry32Bits {
 
         ImGui::TableNextColumn();
         ImGui::Text(" %d ", dpl);
+
         ImGui::TableNextColumn();
         ImGui::TextUnformatted(present ? " 1 " : " 0 ");
+
         ImGui::TableNextColumn();
         ImGui::Text("0x%016lx", raw);
 
@@ -1796,6 +1798,73 @@ struct IdtEntry32Bits {
 } __attribute__((packed));
 static_assert(sizeof(IdtEntry32Bits) == 8);
 
+struct IdtEntry64Bits {
+    static constexpr u32 numCols = 7;
+    static constexpr char const * colNames[numCols] = {
+        "Linear offset",
+        "Segment selector",
+        "IST",
+        "Type",
+        "DPL",
+        " P ",
+        "Raw value",
+    };
+
+    void draw() const {
+        static ImVec4 const unmappedColor(ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+        if (!present) {
+            // Darken the non present descriptors.
+            ImGui::PushStyleColor(ImGuiCol_Text, unmappedColor);
+        }
+
+        u64 const offset((u64(offset63_32) << 32) |
+                         (u64(offset31_16) << 16) |
+                         u64(offset15_0));
+        ImGui::TableNextColumn();
+        ImGui::Text("0x%016lx", offset);
+
+        ImGui::TableNextColumn();
+        ImGui::Text("0x%04hx", segmentSelector);
+
+        ImGui::TableNextColumn();
+        ImGui::Text(" %d ", ist);
+
+        ImGui::TableNextColumn();
+        ImGui::Text(" %d ", type);
+
+        ImGui::TableNextColumn();
+        ImGui::Text(" %d ", dpl);
+
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(present ? " 1 " : " 0 ");
+
+        ImGui::TableNextColumn();
+        ImGui::Text("0x%08x%08x%08x%08x", raw[3], raw[2], raw[1], raw[0]);
+
+        if (!present) {
+            ImGui::PopStyleColor();
+        }
+    }
+
+    union {
+        u32 raw[4];
+        struct {
+            u16 offset15_0 : 16;
+            u16 segmentSelector : 16;
+            u8 ist : 3;
+            u8 : 5;
+            u8 type : 4;
+            u8 : 1;
+            u8 dpl : 2;
+            u8 present : 1;
+            u16 offset31_16 : 16;
+            u32 offset63_32 : 32;
+            u32 : 32;
+        } __attribute__((packed));
+    } __attribute__((packed));
+} __attribute__((packed));
+static_assert(sizeof(IdtEntry64Bits) == 16);
+
 void Imgui::CpuStateWindow::doDrawIdt(State const& state) {
     Vm::State::Registers::Table const idt(state.registers().idt);
     ImGui::Text("IDT base linear address: 0x%016lx", idt.base);
@@ -1809,6 +1878,9 @@ void Imgui::CpuStateWindow::doDrawIdt(State const& state) {
             break;
         case Vm::CpuMode::ProtectedMode:
             doDrawTable<IdtEntry32Bits>(state.registers().idt, state);
+            break;
+        case Vm::CpuMode::LongMode:
+            doDrawTable<IdtEntry64Bits>(state.registers().idt, state);
             break;
         default:
             ImGui::Text("Not supported in current CPU mode");
