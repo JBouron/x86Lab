@@ -1711,6 +1711,91 @@ struct IdtEntry16Bits {
 } __attribute__((packed));
 static_assert(sizeof(IdtEntry16Bits) == 4);
 
+struct IdtEntry32Bits {
+    static constexpr u32 numCols = 7;
+    static constexpr char const * colNames[numCols] = {
+        "Linear offset",
+        "Segment selector",
+        "Type",
+        "Size",
+        "DPL",
+        " P ",
+        "Raw value",
+    };
+
+    void draw() const {
+        static ImVec4 const unmappedColor(ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+        if (!present) {
+            // Darken the non present descriptors.
+            ImGui::PushStyleColor(ImGuiCol_Text, unmappedColor);
+        }
+
+        u32 const offset((offsetHigh << 16) | offsetLow);
+        ImGui::TableNextColumn();
+        ImGui::Text("0x%08x", offset);
+
+        ImGui::TableNextColumn();
+        ImGui::Text("0x%04hx", segmentSelector);
+
+        ImGui::TableNextColumn();
+        switch (type) {
+            case 0b101:
+                ImGui::TextUnformatted("Task gate");
+                break;
+            case 0b110:
+                ImGui::TextUnformatted("Int. gate");
+                break;
+            case 0b111:
+                ImGui::TextUnformatted("Trap gate");
+                break;
+            default:
+                ImGui::TextUnformatted("   ???   ");
+                break;
+        }
+
+        ImGui::TableNextColumn();
+        // Task gates don't have a D bit to indicate the size of the target
+        // handler, this is implicitely defined by the TSS.
+        switch (type) {
+            case 0b110:
+                // FALL-THROUGH
+            case 0b111:
+                ImGui::TextUnformatted(size ? "32-bits" : "16-bits");
+                break;
+            default:
+                ImGui::TextUnformatted("   -   ");
+                break;
+        }
+
+        ImGui::TableNextColumn();
+        ImGui::Text(" %d ", dpl);
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(present ? " 1 " : " 0 ");
+        ImGui::TableNextColumn();
+        ImGui::Text("0x%016lx", raw);
+
+        if (!present) {
+            ImGui::PopStyleColor();
+        }
+    }
+
+    union {
+        u64 raw;
+        struct {
+            u16 offsetLow : 16;
+            u16 segmentSelector : 16;
+            u8 : 8;
+            u8 type : 3;
+            u8 size : 1;
+            u8 : 1;
+            u8 dpl : 2;
+            u8 present : 1;
+            u16 offsetHigh : 16;
+        } __attribute__((packed));
+    } __attribute__((packed));
+} __attribute__((packed));
+static_assert(sizeof(IdtEntry32Bits) == 8);
+
 void Imgui::CpuStateWindow::doDrawIdt(State const& state) {
     Vm::State::Registers::Table const idt(state.registers().idt);
     ImGui::Text("IDT base linear address: 0x%016lx", idt.base);
@@ -1721,6 +1806,9 @@ void Imgui::CpuStateWindow::doDrawIdt(State const& state) {
     switch (cpuMode) {
         case Vm::CpuMode::RealMode:
             doDrawTable<IdtEntry16Bits>(state.registers().idt, state);
+            break;
+        case Vm::CpuMode::ProtectedMode:
+            doDrawTable<IdtEntry32Bits>(state.registers().idt, state);
             break;
         default:
             ImGui::Text("Not supported in current CPU mode");
