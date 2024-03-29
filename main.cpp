@@ -11,7 +11,8 @@
 using namespace X86Lab;
 
 static void help() {
-    std::cerr << "X86Lab: A x86 instruction analyzer" << std::endl;
+    std::cerr << "X86Lab: A playground for x86 assembly programming." <<
+        std::endl;
     std::cerr << "Usage:" << std::endl;
     std::cerr << "    x86lab [options] <file>" << std::endl << std::endl;
     std::cerr << "Options:" << std::endl;
