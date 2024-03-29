@@ -6,6 +6,7 @@
 #include <x86lab/ui/tui.hpp>
 #include <x86lab/ui/imgui.hpp>
 #include <x86lab/runner.hpp>
+#include <filesystem>
 
 using namespace X86Lab;
 
@@ -39,7 +40,13 @@ static void run(std::string const& fileName) {
     bool exitRequested(false);
     // By default the VM starts in 64-bit long mode. This can be changed through
     // the interface. Changing the start CPU mode resets the VM.
-    Vm::CpuMode startCpuMode(Vm::CpuMode::LongMode);
+    // FIXME: To avoid any issue when running the example code, hardcode the
+    // start mode to be 16 bit when running the example. This is a horrendous
+    // hack.
+    bool const runningDemo(std::filesystem::path(fileName).filename()==
+                           "jumpToProtectedAndLongModes.asm");
+    Vm::CpuMode startCpuMode(runningDemo?
+                             Vm::CpuMode::RealMode:Vm::CpuMode::LongMode);
     while (!exitRequested) {
         // When the user requests resetting the VM we simply destroy the VM and
         // re-create it from scratch. This is much easier compared to manually
