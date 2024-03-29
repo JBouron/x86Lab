@@ -12,11 +12,13 @@ programming. This is a tool that can be useful as part of learning x86
 programming, reverse-engineering, or simply to quickly check the behaviour of a
 particular instruction.
 
+![Alt text](/screenshots/screenshot1.png?raw=true "x86Lab")
+
 > Disclaimer: This project is still in a Work-In-Progress state. While most of
 > the basic functionalities are implemented, the UI is still rough around the
-> edges and there are still a few bugs to squash. Despite this, x86Lab still
-> managed to prove itself useful to me, hence I am planning on continuing its
-> development.
+> edges, the implementation is a bit of a mess and there are still a few bugs to
+> squash. Despite this, x86Lab still managed to prove itself useful to me, hence
+> I am planning on continuing its development.
 
 ## Why?
 Imagine you have a small snippet of x86 assembly, maybe this is some code that
