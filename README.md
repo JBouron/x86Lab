@@ -109,6 +109,11 @@ the tests using `make test`.
 The program takes a single argument, the path to the file that contains the
 assembly code to be assembled and analyzed.
 
+The program provides keyboard shortcuts for the most common operations:
+- `q` to quit
+- `s` to step one instruction forward
+- `r` to step one instruction backward
+
 The `example/` directory contains an assembly snippet that starts in real-mode
 and jumps into protected mode and then 64-bit mode. You can execute it as
 follows:
